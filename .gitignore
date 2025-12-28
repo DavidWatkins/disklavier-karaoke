@@ -31,6 +31,7 @@ kar_files/
 soundfonts/
 soundfont-samples/
 *.sh
+scripts/associate-youtube-videos.ts
 
 # Test files
 coverage/

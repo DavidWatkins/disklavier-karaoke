@@ -33,6 +33,7 @@ export default function Controls() {
   const [midiDelay, setMidiDelay] = useState<number>(0)
   const [cleaning, setCleaning] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<{ removed: number; checked: number } | null>(null)
+  const [reloading, setReloading] = useState(false)
   const [showWifiQR, setShowWifiQR] = useState<boolean>(() => {
     return localStorage.getItem('showWifiQR') === 'true'
   })
@@ -251,6 +252,23 @@ export default function Controls() {
     }
   }
 
+  const handleReloadDatabase = async () => {
+    if (!window.electronAPI) return
+
+    setReloading(true)
+    try {
+      await window.electronAPI.reloadDatabase()
+      // Refresh song count
+      const count = await window.electronAPI.getCatalogCount?.() || 0
+      setSongCount(count)
+    } catch (error) {
+      console.error('Failed to reload database:', error)
+      alert('Failed to reload database.')
+    } finally {
+      setReloading(false)
+    }
+  }
+
   return (
     <div className="pb-24 max-w-2xl">
       <h2 className="text-xl font-bold text-white mb-6">Settings</h2>
@@ -314,13 +332,23 @@ export default function Controls() {
             {songCount > 0 && !scanning && (
               <div className="mt-4 p-3 bg-green-900/30 border border-green-800 rounded-lg flex items-center justify-between">
                 <span className="text-green-400">{songCount} songs in catalog</span>
-                <button
-                  onClick={handleCleanupCatalog}
-                  disabled={cleaning}
-                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-sm transition-colors"
-                >
-                  {cleaning ? 'Cleaning...' : 'Remove Missing'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleReloadDatabase}
+                    disabled={reloading}
+                    className="px-3 py-1 bg-indigo-700 hover:bg-indigo-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-sm transition-colors"
+                    title="Reload database to pick up external changes"
+                  >
+                    {reloading ? 'Reloading...' : 'Reload DB'}
+                  </button>
+                  <button
+                    onClick={handleCleanupCatalog}
+                    disabled={cleaning}
+                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-sm transition-colors"
+                  >
+                    {cleaning ? 'Cleaning...' : 'Remove Missing'}
+                  </button>
+                </div>
               </div>
             )}
 

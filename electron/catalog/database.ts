@@ -48,6 +48,24 @@ class CatalogDatabase {
     this.createTables()
   }
 
+  reload(): void {
+    // Close existing connection and reopen to pick up external changes
+    const userDataPath = app.getPath('userData')
+    const dbPath = path.join(userDataPath, 'catalog.db')
+
+    console.log('Reloading database...')
+
+    if (this.db) {
+      this.db.close()
+      this.db = null
+    }
+
+    this.db = new Database(dbPath)
+    this.db.pragma('journal_mode = WAL')
+
+    console.log('Database reloaded successfully')
+  }
+
   private createTables(): void {
     if (!this.db) return
 

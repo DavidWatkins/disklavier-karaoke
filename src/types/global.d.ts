@@ -12,6 +12,7 @@ interface ElectronAPI {
   getSong: (id: number) => Promise<unknown>
   getCatalogCount: () => Promise<number>
   cleanupCatalog: () => Promise<{ removed: number; checked: number }>
+  reloadDatabase: () => Promise<{ success: boolean }>
   onScanProgress: (callback: (progress: unknown) => void) => () => void
 
   // Queue operations

@@ -310,6 +310,12 @@ function registerIpcHandlers() {
     return result
   })
 
+  ipcMain.handle('catalog:reload', () => {
+    console.log('Reloading database from disk...')
+    catalogDb.reload()
+    return { success: true }
+  })
+
   // Queue operations
   ipcMain.handle('queue:add', (_event, songId: number, singerName: string) => {
     const queueId = catalogDb.addToQueue(songId, singerName)

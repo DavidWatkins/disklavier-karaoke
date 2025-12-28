@@ -15,6 +15,7 @@ try {
     getSong: (id: number) => ipcRenderer.invoke('catalog:get', id),
     getCatalogCount: () => ipcRenderer.invoke('catalog:count'),
     cleanupCatalog: () => ipcRenderer.invoke('catalog:cleanup'),
+    reloadDatabase: () => ipcRenderer.invoke('catalog:reload'),
     onScanProgress: (callback: (progress: unknown) => void) => {
       ipcRenderer.on('catalog:scanProgress', (_event: unknown, progress: unknown) => callback(progress))
       return () => ipcRenderer.removeAllListeners('catalog:scanProgress')
