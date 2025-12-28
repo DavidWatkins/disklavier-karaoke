@@ -60,7 +60,7 @@ function createMainWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools()
+    // DevTools disabled by default - use View menu or Cmd+Option+I to open
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
