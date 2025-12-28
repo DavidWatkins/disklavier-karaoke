@@ -29,7 +29,6 @@ export default function Catalog() {
     setLoading(true)
     try {
       // Get count first
-      // @ts-expect-error - getCatalogCount type
       const count = await window.electronAPI.getCatalogCount?.() || 0
       setTotalCount(count)
 

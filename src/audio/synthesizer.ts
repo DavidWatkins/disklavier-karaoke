@@ -1,4 +1,4 @@
-import Soundfont, { Player } from 'soundfont-player'
+import Soundfont, { Player, InstrumentName } from 'soundfont-player'
 
 // General MIDI instrument names for soundfont-player
 const GM_INSTRUMENTS: string[] = [
@@ -91,7 +91,7 @@ class AudioSynthesizer {
     try {
       const player = await Soundfont.instrument(
         this.audioContext,
-        instrumentName as Soundfont.InstrumentName,
+        instrumentName as InstrumentName,
         { gain: 2.0, soundfont: 'MusyngKite' }
       )
       this.instruments.set(program, player)
@@ -120,7 +120,7 @@ class AudioSynthesizer {
       // Start loading the instrument in background
       this.loadInstrument(instrumentProgram)
       // Use default piano while loading
-      player = this.defaultInstrument
+      player = this.defaultInstrument ?? undefined
     }
     if (!player) return
 
@@ -161,7 +161,7 @@ class AudioSynthesizer {
   allNotesOff(): void {
     if (!this.isInitialized) return
 
-    for (const [key, activeNote] of this.activeNotes) {
+    for (const [, activeNote] of this.activeNotes) {
       try {
         activeNote.stopFn()
       } catch {

@@ -1,10 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 
+interface LyricSyllable {
+  text: string
+  time: number
+}
+
 interface LyricLine {
   text: string
   startTime: number
   endTime: number
   isMusicalBreak?: boolean
+  syllables: LyricSyllable[]
 }
 
 interface PlaybackState {
@@ -22,9 +28,15 @@ interface QueueItem {
   title: string
 }
 
+type LyricsMode = 'normal' | 'bouncing'
+
 export default function LyricsDisplay() {
   const [lyrics, setLyrics] = useState<LyricLine[]>([])
   const [currentLineIndex, setCurrentLineIndex] = useState(-1)
+  const [currentTime, setCurrentTime] = useState(0) // in seconds
+  const [lyricsMode, setLyricsMode] = useState<LyricsMode>(() => {
+    return (localStorage.getItem('lyricsMode') as LyricsMode) || 'normal'
+  })
   const [playbackState, setPlaybackState] = useState<PlaybackState>({
     playing: false,
     paused: false,
@@ -54,6 +66,9 @@ export default function LyricsDisplay() {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'showWifiQR') {
         setShowWifiQR(e.newValue === 'true')
+      }
+      if (e.key === 'lyricsMode') {
+        setLyricsMode((e.newValue as LyricsMode) || 'normal')
       }
     }
     window.addEventListener('storage', handleStorage)
@@ -95,13 +110,14 @@ export default function LyricsDisplay() {
 
     // Subscribe to lyrics updates
     const unsubLyrics = window.electronAPI.onLyricsUpdate((data) => {
-      const { lines, currentLineIndex } = data as {
+      const { lines, currentTime: time, currentLineIndex: lineIndex } = data as {
         lines: LyricLine[]
         currentTime: number
         currentLineIndex: number
       }
       setLyrics(lines)
-      setCurrentLineIndex(currentLineIndex)
+      setCurrentLineIndex(lineIndex)
+      setCurrentTime(time)
     })
 
     // Subscribe to playback updates
@@ -141,6 +157,58 @@ export default function LyricsDisplay() {
     if (index < currentLineIndex) return `${baseClass} sung`
     if (index === currentLineIndex) return `${baseClass} current`
     return `${baseClass} upcoming`
+  }
+
+  // Render syllables with individual highlighting for the current line
+  const renderSyllables = (line: LyricLine, lineIndex: number) => {
+    // For musical breaks or lines without syllables, just render text
+    if (line.isMusicalBreak || !line.syllables || line.syllables.length === 0) {
+      return line.text
+    }
+
+    // For non-current lines, just show plain text (preserving the original text formatting)
+    if (lineIndex !== currentLineIndex) {
+      return line.text
+    }
+
+    // For the current line, highlight syllables based on timing
+    return line.syllables.map((syllable, i) => {
+      const isSung = currentTime >= syllable.time
+      const isCurrentSyllable = isSung && (
+        i === line.syllables.length - 1 || currentTime < line.syllables[i + 1].time
+      )
+
+      if (lyricsMode === 'bouncing') {
+        // Bouncing ball mode: show ball above current syllable
+        return (
+          <span
+            key={i}
+            className={`inline-block relative transition-colors duration-100 ${
+              isSung ? 'text-karaoke-current' : 'text-white/70'
+            }`}
+          >
+            {isCurrentSyllable && (
+              <span className="bouncing-ball absolute -top-10 left-1/2 -translate-x-1/2 text-2xl text-yellow-400">
+                ●
+              </span>
+            )}
+            {syllable.text}
+          </span>
+        )
+      }
+
+      // Normal mode: color-based highlighting
+      return (
+        <span
+          key={i}
+          className={`transition-colors duration-100 ${
+            isSung ? 'text-karaoke-current' : 'text-white/70'
+          }`}
+        >
+          {syllable.text}
+        </span>
+      )
+    })
   }
 
   return (
@@ -201,7 +269,7 @@ export default function LyricsDisplay() {
             })
             .map(({ line, index }) => (
               <p key={index} className={getLineClass(index, line)}>
-                {line.text}
+                {renderSyllables(line, index)}
               </p>
             ))
         ) : (

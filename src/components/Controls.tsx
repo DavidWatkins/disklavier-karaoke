@@ -30,6 +30,9 @@ export default function Controls() {
     return localStorage.getItem('showWifiQR') === 'true'
   })
   const [wifiSSID, setWifiSSID] = useState<string | null>(null)
+  const [lyricsMode, setLyricsMode] = useState<'normal' | 'bouncing'>(() => {
+    return (localStorage.getItem('lyricsMode') as 'normal' | 'bouncing') || 'normal'
+  })
 
   useEffect(() => {
     loadSettings()
@@ -77,6 +80,16 @@ export default function Controls() {
     }))
   }
 
+  const handleLyricsModeChange = (mode: 'normal' | 'bouncing') => {
+    setLyricsMode(mode)
+    localStorage.setItem('lyricsMode', mode)
+    // Dispatch event so lyrics window can pick it up
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'lyricsMode',
+      newValue: mode
+    }))
+  }
+
   const handleScanCatalog = async () => {
     console.log('=== SCAN BUTTON CLICKED ===')
     console.log('electronAPI available:', !!window.electronAPI)
@@ -95,7 +108,6 @@ export default function Controls() {
       const result = await window.electronAPI.scanCatalog(catalogPath)
       console.log('Scan result:', result)
       // Refresh song count
-      // @ts-expect-error - getCatalogCount not in types yet
       const count = await window.electronAPI.getCatalogCount?.() || 0
       setSongCount(count)
       setScanProgress(null)
@@ -320,6 +332,50 @@ export default function Controls() {
             </div>
             <p className="text-xs text-gray-500 mt-2">
               The lyrics display will open on an external display if available
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Lyrics Display Settings */}
+      <section className="mb-8">
+        <h3 className="text-lg font-medium text-gray-300 mb-4">Lyrics Display</h3>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">
+              Highlighting Mode
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleLyricsModeChange('normal')}
+                className={`p-4 rounded-lg border-2 transition-colors text-left ${
+                  lyricsMode === 'normal'
+                    ? 'border-indigo-500 bg-indigo-900/30'
+                    : 'border-gray-700 bg-gray-800 hover:border-gray-600'
+                }`}
+              >
+                <span className="block text-white font-medium">Normal</span>
+                <span className="text-xs text-gray-400">
+                  Words highlight as they're sung
+                </span>
+              </button>
+              <button
+                onClick={() => handleLyricsModeChange('bouncing')}
+                className={`p-4 rounded-lg border-2 transition-colors text-left ${
+                  lyricsMode === 'bouncing'
+                    ? 'border-indigo-500 bg-indigo-900/30'
+                    : 'border-gray-700 bg-gray-800 hover:border-gray-600'
+                }`}
+              >
+                <span className="block text-white font-medium">Bouncing Ball</span>
+                <span className="text-xs text-gray-400">
+                  Classic karaoke ball follows words
+                </span>
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Controls how syllables are highlighted during playback
             </p>
           </div>
         </div>

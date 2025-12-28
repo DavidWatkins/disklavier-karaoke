@@ -65,6 +65,26 @@ body {
   }
 }
 
+/* Bouncing ball animation */
+.bouncing-ball {
+  animation: ball-bounce 0.35s ease-in-out infinite;
+  text-shadow: 0 0 10px currentColor;
+}
+
+@keyframes ball-bounce {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-12px) scale(1.1);
+  }
+}
+
+/* Add extra top margin for current line in bouncing mode to make room for ball */
+.lyrics-line.current {
+  margin-top: 2.5rem;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

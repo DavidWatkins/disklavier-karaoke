@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "Karaoke system for Yamaha Disklavier with synchronized lyrics display",
   "main": "dist-electron/main.js",
-  "author": "David",
+  "author": {
+    "name": "David Watkins",
+    "email": "davidw@tkins.me"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
