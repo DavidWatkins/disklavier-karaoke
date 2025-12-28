@@ -8,7 +8,7 @@ interface ElectronAPI {
 
   // Catalog operations
   scanCatalog: (path: string) => Promise<unknown>
-  searchSongs: (query: string) => Promise<unknown[]>
+  searchSongs: (query: string, filters?: { hasLyrics?: boolean; hasVideo?: boolean }) => Promise<unknown[]>
   getSong: (id: number) => Promise<unknown>
   getCatalogCount: () => Promise<number>
   cleanupCatalog: () => Promise<{ removed: number; checked: number }>
@@ -54,6 +54,13 @@ interface ElectronAPI {
 
   // Soundfont management
   listSoundfonts: () => Promise<Array<{ id: string; name: string; type: 'local' | 'cdn' }>>
+
+  // Video URL management
+  updateSongVideoUrl: (songId: number, videoUrl: string | null) => Promise<boolean>
+  getSongVideoUrl: (songId: number) => Promise<string | null>
+
+  // File dialogs
+  selectVideoFile: () => Promise<string | null>
 }
 
 declare global {

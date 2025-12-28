@@ -13,6 +13,7 @@ export interface Song {
   track_count: number
   file_hash: string
   language: string // 'en', 'es', or 'other'
+  video_url: string | null // YouTube or other video URL for background
   created_at: string
   last_played_at: string | null
 }
@@ -82,6 +83,14 @@ class CatalogDatabase {
     // Create language index after migration ensures column exists
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_songs_language ON songs(language)`)
 
+    // Migration: add video_url column if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE songs ADD COLUMN video_url TEXT`)
+      console.log('Added video_url column to songs table')
+    } catch {
+      // Column already exists, which is fine
+    }
+
     // Queue table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS queue (
@@ -149,19 +158,41 @@ class CatalogDatabase {
     return stmt.get(filePath) as Song | null
   }
 
-  searchSongs(query: string, limit = 100): Song[] {
+  searchSongs(query: string, limit = 100, filters?: { hasLyrics?: boolean; hasVideo?: boolean }): Song[] {
     if (!this.db) return [] // Not yet initialized
 
-    if (!query.trim()) {
-      // Return all songs if no query
-      const stmt = this.db.prepare('SELECT * FROM songs ORDER BY title LIMIT ?')
-      return stmt.all(limit) as Song[]
+    // Build WHERE clauses based on filters
+    const conditions: string[] = []
+    const params: (string | number)[] = []
+
+    if (query.trim()) {
+      const searchPattern = `%${query}%`
+      conditions.push('(title LIKE ? OR artist LIKE ?)')
+      params.push(searchPattern, searchPattern)
     }
 
-    const searchPattern = `%${query}%`
+    if (filters?.hasLyrics) {
+      conditions.push('has_lyrics = 1')
+    }
+
+    if (filters?.hasVideo) {
+      conditions.push("video_url IS NOT NULL AND video_url != ''")
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    if (!query.trim()) {
+      // Return all songs matching filters
+      const stmt = this.db.prepare(`SELECT * FROM songs ${whereClause} ORDER BY title LIMIT ?`)
+      params.push(limit)
+      return stmt.all(...params) as Song[]
+    }
+
+    // With search query, use relevance ordering
+    const exactPattern = `${query}%`
     const stmt = this.db.prepare(`
       SELECT * FROM songs
-      WHERE title LIKE ? OR artist LIKE ?
+      ${whereClause}
       ORDER BY
         CASE
           WHEN title LIKE ? THEN 1
@@ -172,8 +203,8 @@ class CatalogDatabase {
       LIMIT ?
     `)
 
-    const exactPattern = `${query}%`
-    return stmt.all(searchPattern, searchPattern, exactPattern, exactPattern, limit) as Song[]
+    params.push(exactPattern, exactPattern, limit)
+    return stmt.all(...params) as Song[]
   }
 
   getAllSongs(): Song[] {
@@ -196,6 +227,22 @@ class CatalogDatabase {
 
     const stmt = this.db.prepare('UPDATE songs SET last_played_at = CURRENT_TIMESTAMP WHERE id = ?')
     stmt.run(songId)
+  }
+
+  // Video URL operations
+  updateSongVideoUrl(songId: number, videoUrl: string | null): void {
+    if (!this.db) throw new Error('Database not initialized')
+
+    const stmt = this.db.prepare('UPDATE songs SET video_url = ? WHERE id = ?')
+    stmt.run(videoUrl, songId)
+  }
+
+  getSongVideoUrl(songId: number): string | null {
+    if (!this.db) throw new Error('Database not initialized')
+
+    const stmt = this.db.prepare('SELECT video_url FROM songs WHERE id = ?')
+    const result = stmt.get(songId) as { video_url: string | null } | undefined
+    return result?.video_url || null
   }
 
   // Queue operations

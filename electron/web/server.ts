@@ -87,12 +87,24 @@ function getLocalIP(): string {
 app.get('/api/songs', (req, res) => {
   const query = (req.query.q as string) || ''
   const lang = req.query.lang as string
+  const hasLyrics = req.query.hasLyrics === 'true'
+  const hasVideo = req.query.hasVideo === 'true'
+  const filters = { hasLyrics, hasVideo }
+
   try {
     let songs
     if (lang && (lang === 'en' || lang === 'es')) {
+      // For language-specific search, we need to add filter support
+      // For now, apply filters post-search (could be optimized later)
       songs = catalogDb.searchSongsByLanguage(query, lang)
+      if (hasLyrics) {
+        songs = songs.filter(s => s.has_lyrics)
+      }
+      if (hasVideo) {
+        songs = songs.filter(s => s.video_url)
+      }
     } else {
-      songs = catalogDb.searchSongs(query)
+      songs = catalogDb.searchSongs(query, 100, filters)
     }
     res.json(songs)
   } catch (error) {
@@ -111,12 +123,22 @@ app.get('/api/queue', (_req, res) => {
 
 app.get('/api/popular', (req, res) => {
   const lang = req.query.lang as string
+  const hasLyrics = req.query.hasLyrics === 'true'
+  const hasVideo = req.query.hasVideo === 'true'
+
   try {
     let songs
     if (lang && (lang === 'en' || lang === 'es')) {
       songs = catalogDb.getPopularByLanguage(lang, 20)
     } else {
       songs = catalogDb.getPopularSongs(20)
+    }
+    // Apply filters
+    if (hasLyrics) {
+      songs = songs.filter(s => s.has_lyrics)
+    }
+    if (hasVideo) {
+      songs = songs.filter(s => s.video_url)
     }
     res.json(songs)
   } catch (error) {
@@ -126,12 +148,22 @@ app.get('/api/popular', (req, res) => {
 
 app.get('/api/discover', (req, res) => {
   const lang = req.query.lang as string
+  const hasLyrics = req.query.hasLyrics === 'true'
+  const hasVideo = req.query.hasVideo === 'true'
+
   try {
     let songs
     if (lang && (lang === 'en' || lang === 'es')) {
       songs = catalogDb.getRandomByLanguage(lang, 20)
     } else {
       songs = catalogDb.getRandomSongs(20)
+    }
+    // Apply filters
+    if (hasLyrics) {
+      songs = songs.filter(s => s.has_lyrics)
+    }
+    if (hasVideo) {
+      songs = songs.filter(s => s.video_url)
     }
     res.json(songs)
   } catch (error) {
@@ -636,6 +668,35 @@ function getMobileAppHTML(): string {
     .lang-btn:active {
       transform: scale(0.98);
     }
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .filter-btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 20px;
+      background: #2a2a4e;
+      color: #888;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .filter-btn.active {
+      background: #4a4a8e;
+      color: white;
+    }
+    .filter-btn.lyrics.active {
+      background: #2d8a4e;
+    }
+    .filter-btn.video.active {
+      background: #c0392b;
+    }
   </style>
 </head>
 <body>
@@ -652,6 +713,11 @@ function getMobileAppHTML(): string {
     <button class="lang-btn active" id="langAll" onclick="setLanguage('')">All</button>
     <button class="lang-btn" id="langEn" onclick="setLanguage('en')">English</button>
     <button class="lang-btn" id="langEs" onclick="setLanguage('es')">Espanol</button>
+  </div>
+
+  <div class="filter-row">
+    <button class="filter-btn lyrics" id="filterLyrics" onclick="toggleFilter('lyrics')">🎤 Has Lyrics</button>
+    <button class="filter-btn video" id="filterVideo" onclick="toggleFilter('video')">▶️ Has Video</button>
   </div>
 
   <div id="homeSection">
@@ -699,6 +765,8 @@ function getMobileAppHTML(): string {
     let selectedSong = null;
     let ws = null;
     let currentLanguage = '';
+    let filterLyrics = false;
+    let filterVideo = false;
 
     // WebSocket connection
     function connectWS() {
@@ -737,6 +805,32 @@ function getMobileAppHTML(): string {
       return currentLanguage ? '&lang=' + currentLanguage : '';
     }
 
+    function getFilterParams() {
+      let params = '';
+      if (filterLyrics) params += '&hasLyrics=true';
+      if (filterVideo) params += '&hasVideo=true';
+      return params;
+    }
+
+    function toggleFilter(type) {
+      if (type === 'lyrics') {
+        filterLyrics = !filterLyrics;
+        document.getElementById('filterLyrics').classList.toggle('active', filterLyrics);
+      } else if (type === 'video') {
+        filterVideo = !filterVideo;
+        document.getElementById('filterVideo').classList.toggle('active', filterVideo);
+      }
+
+      // Refresh content with new filters
+      loadHomeContent();
+
+      // If searching, refresh search results
+      const query = searchInput.value.trim();
+      if (query.length >= 2) {
+        searchSongs(query);
+      }
+    }
+
     // Search functionality
     const searchInput = document.getElementById('searchInput');
     let searchTimeout;
@@ -753,7 +847,7 @@ function getMobileAppHTML(): string {
 
     async function searchSongs(query) {
       try {
-        const res = await fetch('/api/songs?q=' + encodeURIComponent(query) + getLangParam());
+        const res = await fetch('/api/songs?q=' + encodeURIComponent(query) + getLangParam() + getFilterParams());
         const songs = await res.json();
         renderResults(songs);
       } catch (e) {
@@ -883,11 +977,18 @@ function getMobileAppHTML(): string {
       return div.innerHTML;
     }
 
-    // Load home content (respects language filter)
+    // Load home content (respects language and content filters)
     function loadHomeContent() {
-      const langQuery = currentLanguage ? '?lang=' + currentLanguage : '';
-      fetch('/api/popular' + langQuery).then(r => r.json()).then(renderPopular).catch(() => {});
-      fetch('/api/discover' + langQuery).then(r => r.json()).then(renderDiscover).catch(() => {});
+      let query = '?';
+      if (currentLanguage) query += 'lang=' + currentLanguage + '&';
+      if (filterLyrics) query += 'hasLyrics=true&';
+      if (filterVideo) query += 'hasVideo=true&';
+      // Remove trailing & or ?
+      query = query.replace(/[&?]$/, '');
+      if (query === '?') query = '';
+
+      fetch('/api/popular' + query).then(r => r.json()).then(renderPopular).catch(() => {});
+      fetch('/api/discover' + query).then(r => r.json()).then(renderDiscover).catch(() => {});
     }
 
     // Load initial data

@@ -63,6 +63,7 @@ class AudioSynthesizer {
   private isInitialized = false
   private isMuted = false
   private gainNode: GainNode | null = null
+  private analyserNode: AnalyserNode | null = null
   private activeNotes: Map<string, ActiveNote> = new Map()
 
   // CDN mode (soundfont-player)
@@ -89,6 +90,13 @@ class AudioSynthesizer {
     this.gainNode = this.audioContext.createGain()
     this.gainNode.gain.value = 0.8
     this.gainNode.connect(this.audioContext.destination)
+
+    // Create analyser node for visualizations (connected to destination to capture all audio)
+    this.analyserNode = this.audioContext.createAnalyser()
+    this.analyserNode.fftSize = 256
+    this.analyserNode.smoothingTimeConstant = 0.8
+    // Connect destination to analyser via a MediaStreamDestination workaround
+    // For now, just create the analyser - visualizer will use demo mode
 
     // Load saved soundfont preference
     const savedSoundfont = localStorage.getItem('soundfontId')
@@ -324,6 +332,14 @@ class AudioSynthesizer {
 
   getCurrentSoundfontId(): string {
     return this.currentSoundfontId
+  }
+
+  getAudioContext(): AudioContext | null {
+    return this.audioContext
+  }
+
+  getAnalyserNode(): AnalyserNode | null {
+    return this.analyserNode
   }
 
   dispose(): void {

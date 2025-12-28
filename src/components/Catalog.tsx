@@ -6,6 +6,7 @@ interface Song {
   artist: string
   duration_ms: number
   has_lyrics: boolean
+  video_url?: string | null
 }
 
 export default function Catalog() {
@@ -15,6 +16,11 @@ export default function Catalog() {
   const [singerName, setSingerName] = useState('')
   const [totalCount, setTotalCount] = useState(0)
   const [addedSongIds, setAddedSongIds] = useState<Set<number>>(new Set())
+  const [editingVideoSong, setEditingVideoSong] = useState<Song | null>(null)
+  const [videoUrlInput, setVideoUrlInput] = useState('')
+  const [savingVideoUrl, setSavingVideoUrl] = useState(false)
+  const [filterLyrics, setFilterLyrics] = useState(false)
+  const [filterVideo, setFilterVideo] = useState(false)
 
   useEffect(() => {
     // Load initial catalog
@@ -43,12 +49,13 @@ export default function Catalog() {
     }
   }
 
-  const searchSongs = async (query: string) => {
+  const searchSongs = async (query: string, filters?: { hasLyrics?: boolean; hasVideo?: boolean }) => {
     if (!window.electronAPI) return
 
     setLoading(true)
     try {
-      const results = await window.electronAPI.searchSongs(query) as Song[]
+      const activeFilters = filters || { hasLyrics: filterLyrics, hasVideo: filterVideo }
+      const results = await window.electronAPI.searchSongs(query, activeFilters) as Song[]
       setSongs(results)
     } catch (error) {
       console.error('Failed to search songs:', error)
@@ -56,6 +63,11 @@ export default function Catalog() {
       setLoading(false)
     }
   }
+
+  // Re-search when filters change
+  useEffect(() => {
+    searchSongs(searchQuery, { hasLyrics: filterLyrics, hasVideo: filterVideo })
+  }, [filterLyrics, filterVideo])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -89,6 +101,44 @@ export default function Catalog() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  const openVideoUrlModal = async (song: Song) => {
+    if (!window.electronAPI) return
+
+    try {
+      const currentUrl = await window.electronAPI.getSongVideoUrl(song.id)
+      setVideoUrlInput(currentUrl || '')
+      setEditingVideoSong(song)
+    } catch (error) {
+      console.error('Failed to get video URL:', error)
+      setVideoUrlInput('')
+      setEditingVideoSong(song)
+    }
+  }
+
+  const handleSaveVideoUrl = async () => {
+    if (!editingVideoSong || !window.electronAPI) return
+
+    setSavingVideoUrl(true)
+    try {
+      const urlToSave = videoUrlInput.trim() || null
+      await window.electronAPI.updateSongVideoUrl(editingVideoSong.id, urlToSave)
+
+      // Update local state
+      setSongs(prev =>
+        prev.map(s =>
+          s.id === editingVideoSong.id ? { ...s, video_url: urlToSave } : s
+        )
+      )
+
+      setEditingVideoSong(null)
+      setVideoUrlInput('')
+    } catch (error) {
+      console.error('Failed to save video URL:', error)
+    } finally {
+      setSavingVideoUrl(false)
+    }
+  }
+
   return (
     <div className="pb-24">
       {/* Header with count and refresh */}
@@ -105,7 +155,7 @@ export default function Catalog() {
       </div>
 
       {/* Search and Singer Name */}
-      <div className="mb-6 flex gap-4">
+      <div className="mb-4 flex gap-4">
         <form onSubmit={handleSearch} className="flex-1">
           <div className="relative">
             <input
@@ -133,6 +183,41 @@ export default function Catalog() {
             className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
           />
         </div>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-6 flex gap-3">
+        <button
+          onClick={() => setFilterLyrics(!filterLyrics)}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            filterLyrics
+              ? 'bg-green-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          🎤 Has Lyrics
+        </button>
+        <button
+          onClick={() => setFilterVideo(!filterVideo)}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            filterVideo
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          ▶️ Has Video
+        </button>
+        {(filterLyrics || filterVideo) && (
+          <button
+            onClick={() => {
+              setFilterLyrics(false)
+              setFilterVideo(false)
+            }}
+            className="px-3 py-1.5 rounded-full text-sm text-gray-400 hover:text-white transition-colors"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Song List */}
@@ -167,7 +252,7 @@ export default function Catalog() {
                 <p className="text-sm text-gray-400">{song.artist}</p>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 <span className="text-sm text-gray-500">
                   {formatDuration(song.duration_ms)}
                 </span>
@@ -178,6 +263,21 @@ export default function Catalog() {
                   </span>
                 )}
 
+                {/* YouTube video link button */}
+                <button
+                  onClick={() => openVideoUrlModal(song)}
+                  className={`p-2 rounded transition-colors ${
+                    song.video_url
+                      ? 'text-red-400 hover:text-red-300 hover:bg-gray-700'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+                  }`}
+                  title={song.video_url ? 'Edit YouTube video' : 'Set YouTube video'}
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0C.488 3.45.029 5.804 0 12c.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0C23.512 20.55 23.971 18.196 24 12c-.029-6.185-.484-8.549-4.385-8.816zM9 16V8l8 4-8 4z"/>
+                  </svg>
+                </button>
+
                 <button
                   onClick={() => addToQueue(song)}
                   disabled={addedSongIds.has(song.id)}
@@ -187,11 +287,57 @@ export default function Catalog() {
                       : 'bg-indigo-600 hover:bg-indigo-700'
                   }`}
                 >
-                  {addedSongIds.has(song.id) ? 'Added ✓' : 'Add to Queue'}
+                  {addedSongIds.has(song.id) ? 'Added' : 'Add to Queue'}
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* YouTube URL Modal */}
+      {editingVideoSong && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-medium text-white mb-2">
+              Set YouTube Video
+            </h3>
+            <p className="text-sm text-gray-400 mb-4">
+              {editingVideoSong.title} - {editingVideoSong.artist}
+            </p>
+
+            <input
+              type="text"
+              value={videoUrlInput}
+              onChange={(e) => setVideoUrlInput(e.target.value)}
+              placeholder="https://youtube.com/watch?v=..."
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+              autoFocus
+            />
+
+            <p className="text-xs text-gray-500 mb-4">
+              The music video will play as the background when this song is playing (if YouTube background mode is enabled in Settings).
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setEditingVideoSong(null)
+                  setVideoUrlInput('')
+                }}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveVideoUrl}
+                disabled={savingVideoUrl}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors"
+              >
+                {savingVideoUrl ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

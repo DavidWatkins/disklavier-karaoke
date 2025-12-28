@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, dialog } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -28,6 +28,7 @@ console.log('preload exists:', fs.existsSync(path.join(__dirname, 'preload.js'))
 
 let mainWindow: BrowserWindow | null = null
 let lyricsWindow: BrowserWindow | null = null
+let currentVideoUrl: string | null = null // Track current song's video URL for background
 
 const isDev = !app.isPackaged
 
@@ -118,6 +119,11 @@ function sendToAllWindows(channel: string, data: unknown) {
   }
 }
 
+// Helper to send playback state with video URL
+function sendPlaybackState(state: unknown) {
+  sendToAllWindows('playback:update', { ...(state as object), videoUrl: currentVideoUrl })
+}
+
 // Setup MIDI player event handlers
 function setupMidiPlayerEvents() {
   midiPlayer.on('lyrics', (lyricsData) => {
@@ -125,20 +131,21 @@ function setupMidiPlayerEvents() {
   })
 
   midiPlayer.on('update', (state) => {
-    sendToAllWindows('playback:update', state)
+    sendPlaybackState(state)
   })
 
   // Forward play/pause/stop state changes
   midiPlayer.on('play', (state) => {
-    sendToAllWindows('playback:update', state)
+    sendPlaybackState(state)
   })
 
   midiPlayer.on('pause', (state) => {
-    sendToAllWindows('playback:update', state)
+    sendPlaybackState(state)
   })
 
   midiPlayer.on('stop', (state) => {
-    sendToAllWindows('playback:update', state)
+    currentVideoUrl = null // Clear video URL when stopped
+    sendPlaybackState(state)
   })
 
   // Forward note events to renderer for audio synthesis
@@ -179,7 +186,8 @@ function playNextInQueue() {
 
   if (!next) {
     console.log('Queue is empty')
-    sendToAllWindows('playback:update', midiPlayer.getState())
+    currentVideoUrl = null
+    sendPlaybackState(midiPlayer.getState())
     return
   }
 
@@ -217,7 +225,10 @@ function playNextInQueue() {
     const queue = catalogDb.getQueue()
     sendToAllWindows('queue:update', queue)
     broadcastQueue(queue) // Send to web clients
-    sendToAllWindows('playback:update', midiPlayer.getState())
+
+    // Set current video URL for YouTube background
+    currentVideoUrl = song.video_url || null
+    sendPlaybackState(midiPlayer.getState())
   } catch (error) {
     console.error('Error playing song:', error)
     catalogDb.setQueueItemStatus(next.id, 'skipped')
@@ -280,8 +291,8 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('catalog:search', (_event, query: string) => {
-    return catalogDb.searchSongs(query)
+  ipcMain.handle('catalog:search', (_event, query: string, filters?: { hasLyrics?: boolean; hasVideo?: boolean }) => {
+    return catalogDb.searchSongs(query, 100, filters)
   })
 
   ipcMain.handle('catalog:get', (_event, id: number) => {
@@ -358,26 +369,27 @@ function registerIpcHandlers() {
     } else if (!state.playing) {
       playNextInQueue()
     }
-    return midiPlayer.getState()
+    return { ...midiPlayer.getState(), videoUrl: currentVideoUrl }
   })
 
   ipcMain.handle('playback:pause', () => {
     midiPlayer.pause()
-    return midiPlayer.getState()
+    return { ...midiPlayer.getState(), videoUrl: currentVideoUrl }
   })
 
   ipcMain.handle('playback:stop', () => {
     midiPlayer.stop()
-    return midiPlayer.getState()
+    currentVideoUrl = null
+    return { ...midiPlayer.getState(), videoUrl: currentVideoUrl }
   })
 
   ipcMain.handle('playback:state', () => {
-    return midiPlayer.getState()
+    return { ...midiPlayer.getState(), videoUrl: currentVideoUrl }
   })
 
   ipcMain.handle('playback:seek', (_event, timeMs: number) => {
     midiPlayer.seek(timeMs)
-    return midiPlayer.getState()
+    return { ...midiPlayer.getState(), videoUrl: currentVideoUrl }
   })
 
   // MIDI operations
@@ -424,6 +436,27 @@ function registerIpcHandlers() {
 
   ipcMain.handle('web:getWifiSSID', () => {
     return getWifiSSID()
+  })
+
+  // Video URL management
+  ipcMain.handle('catalog:updateVideoUrl', (_event, songId: number, videoUrl: string | null) => {
+    catalogDb.updateSongVideoUrl(songId, videoUrl)
+    return true
+  })
+
+  ipcMain.handle('catalog:getVideoUrl', (_event, songId: number) => {
+    return catalogDb.getSongVideoUrl(songId)
+  })
+
+  // File dialogs
+  ipcMain.handle('dialog:selectVideo', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'] }
+      ]
+    })
+    return result.filePaths[0] || null
   })
 }
 

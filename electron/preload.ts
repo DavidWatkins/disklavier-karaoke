@@ -11,7 +11,7 @@ try {
 
     // Catalog operations
     scanCatalog: (path: string) => ipcRenderer.invoke('catalog:scan', path),
-    searchSongs: (query: string) => ipcRenderer.invoke('catalog:search', query),
+    searchSongs: (query: string, filters?: { hasLyrics?: boolean; hasVideo?: boolean }) => ipcRenderer.invoke('catalog:search', query, filters),
     getSong: (id: number) => ipcRenderer.invoke('catalog:get', id),
     getCatalogCount: () => ipcRenderer.invoke('catalog:count'),
     cleanupCatalog: () => ipcRenderer.invoke('catalog:cleanup'),
@@ -86,7 +86,16 @@ try {
     },
 
     // Soundfont management
-    listSoundfonts: () => ipcRenderer.invoke('soundfont:list')
+    listSoundfonts: () => ipcRenderer.invoke('soundfont:list'),
+
+    // Video URL management
+    updateSongVideoUrl: (songId: number, videoUrl: string | null) =>
+      ipcRenderer.invoke('catalog:updateVideoUrl', songId, videoUrl),
+    getSongVideoUrl: (songId: number) =>
+      ipcRenderer.invoke('catalog:getVideoUrl', songId),
+
+    // File dialogs
+    selectVideoFile: () => ipcRenderer.invoke('dialog:selectVideo')
   })
   console.log('=== PRELOAD SCRIPT LOADED SUCCESSFULLY ===')
 } catch (error) {
@@ -101,7 +110,7 @@ declare global {
       closeLyricsWindow: () => Promise<boolean>
       getDisplays: () => Promise<Array<{ id: number; bounds: { x: number; y: number; width: number; height: number }; label: string }>>
       scanCatalog: (path: string) => Promise<unknown>
-      searchSongs: (query: string) => Promise<unknown[]>
+      searchSongs: (query: string, filters?: { hasLyrics?: boolean; hasVideo?: boolean }) => Promise<unknown[]>
       getSong: (id: number) => Promise<unknown>
       getCatalogCount: () => Promise<number>
       cleanupCatalog: () => Promise<{ removed: number; checked: number }>
@@ -133,6 +142,9 @@ declare global {
       updateSetting: (key: string, value: unknown) => Promise<boolean>
       onSettingsChanged: (callback: (data: { key: string; value: unknown }) => void) => () => void
       listSoundfonts: () => Promise<Array<{ id: string; name: string; type: 'local' | 'cdn' }>>
+      updateSongVideoUrl: (songId: number, videoUrl: string | null) => Promise<boolean>
+      getSongVideoUrl: (songId: number) => Promise<string | null>
+      selectVideoFile: () => Promise<string | null>
     }
   }
 }

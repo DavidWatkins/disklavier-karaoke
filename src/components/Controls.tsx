@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { BackgroundType } from '../backgrounds/BackgroundRenderer'
 
 interface Display {
   id: number
@@ -44,6 +45,22 @@ export default function Controls() {
     return localStorage.getItem('soundfontId') || 'cdn:FluidR3_GM'
   })
   const [loadingSoundfont, setLoadingSoundfont] = useState(false)
+  const [backgroundType, setBackgroundType] = useState<BackgroundType>(() => {
+    const saved = localStorage.getItem('backgroundType') as BackgroundType
+    // Migrate old 'youtube' setting to new system
+    if (saved === 'youtube') {
+      localStorage.setItem('backgroundType', 'none')
+      localStorage.setItem('youtubeBackgroundEnabled', 'true')
+      return 'none'
+    }
+    return saved || 'none'
+  })
+  const [backgroundVideoPath, setBackgroundVideoPath] = useState<string | null>(() => {
+    return localStorage.getItem('backgroundVideoPath') || null
+  })
+  const [youtubeEnabled, setYoutubeEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('youtubeBackgroundEnabled') !== 'false' // Default to true
+  })
 
   useEffect(() => {
     loadSettings()
@@ -134,6 +151,34 @@ export default function Controls() {
     localStorage.setItem('lyricsMode', mode)
     // Broadcast to all windows via IPC
     window.electronAPI?.updateSetting('lyricsMode', mode)
+  }
+
+  const handleBackgroundTypeChange = async (type: BackgroundType) => {
+    setBackgroundType(type)
+    localStorage.setItem('backgroundType', type)
+    // Broadcast to all windows via IPC
+    await window.electronAPI?.updateSetting('backgroundType', type)
+  }
+
+  const handleSelectVideo = async () => {
+    if (!window.electronAPI) return
+
+    try {
+      const path = await window.electronAPI.selectVideoFile?.()
+      if (path) {
+        setBackgroundVideoPath(path)
+        localStorage.setItem('backgroundVideoPath', path)
+        await window.electronAPI.updateSetting('backgroundVideoPath', path)
+      }
+    } catch (error) {
+      console.error('Failed to select video file:', error)
+    }
+  }
+
+  const handleYoutubeToggle = async (enabled: boolean) => {
+    setYoutubeEnabled(enabled)
+    localStorage.setItem('youtubeBackgroundEnabled', enabled ? 'true' : 'false')
+    await window.electronAPI?.updateSetting('youtubeBackgroundEnabled', enabled)
   }
 
   const handleScanCatalog = async () => {
@@ -458,6 +503,95 @@ export default function Controls() {
               Controls how syllables are highlighted during playback
             </p>
           </div>
+        </div>
+      </section>
+
+      {/* Background Settings */}
+      <section className="mb-8">
+        <h3 className="text-lg font-medium text-gray-300 mb-4">Background</h3>
+
+        <div className="space-y-4">
+          {/* YouTube Toggle */}
+          <div className="p-4 bg-gray-800 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white font-medium">YouTube Music Videos</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Show song's YouTube video as background when available
+                </p>
+              </div>
+              <button
+                onClick={() => handleYoutubeToggle(!youtubeEnabled)}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  youtubeEnabled ? 'bg-red-600' : 'bg-gray-600'
+                } cursor-pointer`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                    youtubeEnabled ? 'translate-x-6' : ''
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              Set YouTube URLs per-song using the video icon in the Catalog tab.
+            </p>
+          </div>
+
+          {/* Fallback Background Type */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">
+              {youtubeEnabled ? 'Fallback Background' : 'Background Type'}
+            </label>
+            <p className="text-xs text-gray-500 mb-3">
+              {youtubeEnabled
+                ? 'Shown when the current song has no YouTube video'
+                : 'Background animation for the lyrics display'}
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'none', label: 'Solid Color', desc: 'Default dark background' },
+                { id: 'starfield', label: 'Starfield', desc: 'Flying through stars' },
+                { id: 'matrix', label: 'Matrix', desc: 'Green falling code' },
+                { id: 'gradient', label: 'Gradient', desc: 'Shifting colors' },
+                { id: 'visualizer', label: 'Visualizer', desc: 'Audio-reactive ring' },
+                { id: 'video', label: 'Video File', desc: 'Local video loop' }
+              ].map(bg => (
+                <button
+                  key={bg.id}
+                  onClick={() => handleBackgroundTypeChange(bg.id as BackgroundType)}
+                  className={`p-3 rounded-lg border-2 transition-colors text-left ${
+                    backgroundType === bg.id
+                      ? 'border-indigo-500 bg-indigo-900/30'
+                      : 'border-gray-700 bg-gray-800 hover:border-gray-600'
+                  }`}
+                >
+                  <span className="block text-white font-medium text-sm">{bg.label}</span>
+                  <span className="text-xs text-gray-400">{bg.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Video file selector */}
+          {backgroundType === 'video' && (
+            <div className="p-4 bg-gray-800 rounded-lg">
+              <p className="text-sm text-gray-400 mb-2">
+                {backgroundVideoPath
+                  ? `Selected: ${backgroundVideoPath.split('/').pop()}`
+                  : 'No video selected'}
+              </p>
+              <button
+                onClick={handleSelectVideo}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded text-sm transition-colors"
+              >
+                Select Video File
+              </button>
+              <p className="text-xs text-gray-500 mt-2">
+                Supports MP4, WebM, MOV, and other video formats
+              </p>
+            </div>
+          )}
         </div>
       </section>
 

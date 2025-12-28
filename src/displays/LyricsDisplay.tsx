@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import BackgroundRenderer, { BackgroundType } from '../backgrounds/BackgroundRenderer'
 
 interface LyricSyllable {
   text: string
@@ -21,6 +22,7 @@ interface PlaybackState {
   songName: string
   artist: string
   singer: string
+  videoUrl?: string | null
 }
 
 interface QueueItem {
@@ -53,7 +55,73 @@ export default function LyricsDisplay() {
   const [showWifiQR, setShowWifiQR] = useState<boolean>(() => {
     return localStorage.getItem('showWifiQR') === 'true'
   })
+  const [backgroundType, setBackgroundType] = useState<BackgroundType>(() => {
+    const saved = localStorage.getItem('backgroundType') as BackgroundType
+    // Migrate old 'youtube' setting to new system
+    if (saved === 'youtube') {
+      localStorage.setItem('backgroundType', 'none')
+      localStorage.setItem('youtubeBackgroundEnabled', 'true')
+      return 'none'
+    }
+    return saved || 'none'
+  })
+  const [backgroundVideoPath, setBackgroundVideoPath] = useState<string | null>(() => {
+    return localStorage.getItem('backgroundVideoPath') || null
+  })
+  const [youtubeEnabled, setYoutubeEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('youtubeBackgroundEnabled') !== 'false' // Default to true
+  })
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Microphone audio analyser for visualizer
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null)
+
+  // Set up microphone input for visualizer
+  useEffect(() => {
+    let audioContext: AudioContext | null = null
+    let stream: MediaStream | null = null
+
+    const setupMicrophone = async () => {
+      try {
+        // Request microphone access
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        })
+
+        // Create audio context and analyser
+        audioContext = new AudioContext()
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0.3
+
+        // Connect microphone to analyser
+        const source = audioContext.createMediaStreamSource(stream)
+        source.connect(analyser)
+        // Don't connect to destination - we don't want to play the mic back
+
+        setAnalyserNode(analyser)
+        console.log('Microphone connected to visualizer')
+      } catch (error) {
+        console.log('Microphone not available for visualizer:', error)
+        // Visualizer will fall back to demo mode
+      }
+    }
+
+    setupMicrophone()
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop())
+      }
+      if (audioContext) {
+        audioContext.close()
+      }
+    }
+  }, [])
 
   // Fetch QR codes on mount
   useEffect(() => {
@@ -72,6 +140,15 @@ export default function LyricsDisplay() {
       }
       if (data.key === 'lyricsMode') {
         setLyricsMode((data.value as LyricsMode) || 'normal')
+      }
+      if (data.key === 'backgroundType') {
+        setBackgroundType((data.value as BackgroundType) || 'none')
+      }
+      if (data.key === 'backgroundVideoPath') {
+        setBackgroundVideoPath(data.value as string | null)
+      }
+      if (data.key === 'youtubeBackgroundEnabled') {
+        setYoutubeEnabled(data.value === true || data.value === 'true')
       }
     })
 
@@ -242,10 +319,35 @@ export default function LyricsDisplay() {
     })
   }
 
+  // Determine effective background:
+  // - If YouTube is enabled AND current song has a video URL, show YouTube
+  // - Otherwise, show the selected fallback background type
+  const hasYoutubeVideo = youtubeEnabled && playbackState.videoUrl
+  const effectiveBackgroundType: BackgroundType = hasYoutubeVideo ? 'youtube' : backgroundType
+  const youtubeUrl = hasYoutubeVideo ? playbackState.videoUrl : null
+
+  // Debug logging for YouTube background
+  if (youtubeEnabled && playbackState.playing) {
+    console.log('Background:', { youtubeEnabled, hasVideo: !!playbackState.videoUrl, effectiveType: effectiveBackgroundType })
+  }
+
   return (
     <div className="lyrics-container bg-karaoke-bg text-white overflow-hidden h-screen relative">
+      {/* Background Layer */}
+      <BackgroundRenderer
+        type={effectiveBackgroundType}
+        videoPath={effectiveBackgroundType === 'video' ? backgroundVideoPath : null}
+        youtubeUrl={youtubeUrl}
+        analyserNode={analyserNode}
+      />
+
+      {/* Semi-transparent overlay for readability when background is active */}
+      {effectiveBackgroundType !== 'none' && (
+        <div className="absolute inset-0 bg-black/40" style={{ zIndex: 1 }} />
+      )}
+
       {/* Header with song info */}
-      <div className="absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 to-transparent z-10">
+      <div className="absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 to-transparent z-20">
         <div className="flex items-center justify-between">
           <div>
             {playbackState.songName ? (
@@ -288,7 +390,7 @@ export default function LyricsDisplay() {
       {/* Lyrics area */}
       <div
         ref={containerRef}
-        className="flex-1 flex flex-col items-center justify-center py-32 px-8"
+        className="flex-1 flex flex-col items-center justify-center py-32 px-8 relative z-10"
       >
         {lyrics.length > 0 ? (
           // Show only 5 lines: 2 previous, current, 2 next
@@ -312,7 +414,7 @@ export default function LyricsDisplay() {
       </div>
 
       {/* Footer with next up */}
-      <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent">
+      <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent z-20">
         <div className="flex items-center justify-between">
           <div>
             {nextUp && (
