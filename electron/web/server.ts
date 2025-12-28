@@ -12,7 +12,9 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // Load .env file from project root
-config({ path: path.join(__dirname, '../../.env') })
+// In dev: __dirname is dist-electron, so go up one level
+// In packaged app: same logic applies
+config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
 app.use(express.json())
