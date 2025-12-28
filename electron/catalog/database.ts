@@ -69,16 +69,18 @@ class CatalogDatabase {
       CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title);
       CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
       CREATE INDEX IF NOT EXISTS idx_songs_file_path ON songs(file_path);
-      CREATE INDEX IF NOT EXISTS idx_songs_language ON songs(language);
     `)
 
-    // Migration: add language column if it doesn't exist
+    // Migration: add language column if it doesn't exist (for existing databases)
     try {
       this.db.exec(`ALTER TABLE songs ADD COLUMN language TEXT DEFAULT 'en'`)
       console.log('Added language column to songs table')
     } catch {
-      // Column already exists
+      // Column already exists, which is fine
     }
+
+    // Create language index after migration ensures column exists
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_songs_language ON songs(language)`)
 
     // Queue table
     this.db.exec(`
