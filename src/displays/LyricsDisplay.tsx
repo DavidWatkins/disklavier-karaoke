@@ -26,6 +26,7 @@ interface PlaybackState {
 interface QueueItem {
   singer_name: string
   title: string
+  status: 'pending' | 'playing' | 'completed' | 'skipped'
 }
 
 type LyricsMode = 'normal' | 'bouncing'
@@ -130,7 +131,8 @@ export default function LyricsDisplay() {
     // Subscribe to queue updates for "up next"
     const unsubQueue = window.electronAPI.onQueueUpdate((queue) => {
       const q = queue as QueueItem[]
-      const pending = q.filter((item) => item.singer_name)
+      // Only show songs with 'pending' status as next up (not 'playing', 'completed', or 'skipped')
+      const pending = q.filter((item) => item.status === 'pending')
       setNextUp(pending[0] || null)
     })
 

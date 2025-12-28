@@ -27,7 +27,9 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sfumato": "^0.1.2",
     "soundfont-player": "^0.12.0",
+    "spessasynth_lib": "^4.0.19",
     "tone": "^15.0.4",
     "utf-8-validate": "^6.0.6",
     "ws": "^8.18.0"

@@ -14,6 +14,7 @@ export default function Catalog() {
   const [loading, setLoading] = useState(true)
   const [singerName, setSingerName] = useState('')
   const [totalCount, setTotalCount] = useState(0)
+  const [addedSongIds, setAddedSongIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     // Load initial catalog
@@ -67,8 +68,16 @@ export default function Catalog() {
     const name = singerName.trim() || 'Anonymous'
     try {
       await window.electronAPI.addToQueue(song.id, name)
-      // Show feedback
-      alert(`Added "${song.title}" to queue for ${name}`)
+      // Show "Added" feedback on the button
+      setAddedSongIds(prev => new Set(prev).add(song.id))
+      // Revert back after 2 seconds
+      setTimeout(() => {
+        setAddedSongIds(prev => {
+          const next = new Set(prev)
+          next.delete(song.id)
+          return next
+        })
+      }, 2000)
     } catch (error) {
       console.error('Failed to add to queue:', error)
     }
@@ -171,9 +180,14 @@ export default function Catalog() {
 
                 <button
                   onClick={() => addToQueue(song)}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded transition-colors text-sm"
+                  disabled={addedSongIds.has(song.id)}
+                  className={`px-4 py-2 rounded transition-colors text-sm ${
+                    addedSongIds.has(song.id)
+                      ? 'bg-green-600 cursor-default'
+                      : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
                 >
-                  Add to Queue
+                  {addedSongIds.has(song.id) ? 'Added ✓' : 'Add to Queue'}
                 </button>
               </div>
             </div>

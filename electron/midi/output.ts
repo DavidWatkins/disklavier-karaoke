@@ -105,7 +105,6 @@ class MidiOutputManagerImpl implements MidiOutputManager {
   }
 
   private sendCount = 0
-  private noOutputWarningLogged = false
 
   send(message: number[]): void {
     // Skip sends during output switching to prevent crashes
@@ -121,17 +120,11 @@ class MidiOutputManagerImpl implements MidiOutputManager {
           console.log(`[MidiOutput SEND #${this.sendCount}] to ${this.connectedName}: [${message.join(', ')}]`)
         }
         this.output.send(message)
-        this.noOutputWarningLogged = false
       } catch (error) {
         console.error('Error sending MIDI message:', error)
       }
-    } else {
-      // Only log warning once until reconnected
-      if (!this.noOutputWarningLogged) {
-        console.warn('MIDI send called but no output connected (further warnings suppressed)')
-        this.noOutputWarningLogged = true
-      }
     }
+    // Silently ignore sends when no output connected - this is expected when no Disklavier is available
   }
 
   isConnected(): boolean {

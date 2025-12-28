@@ -4,12 +4,41 @@ import { createServer } from 'http'
 import { networkInterfaces } from 'os'
 import QRCode from 'qrcode'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { config } from 'dotenv'
 import { catalogDb } from '../catalog/database.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// Soundfont directory path
+function getSoundfontDir(): string {
+  // __dirname is dist-electron in dev, so go up one level to project root
+  const devPath = path.join(__dirname, '../soundfonts')
+  if (fs.existsSync(devPath)) return devPath
+  // In packaged app: resources/soundfonts
+  return path.join(process.resourcesPath || __dirname, 'soundfonts')
+}
+
+// List available soundfonts
+export function listSoundfonts(): Array<{ id: string; name: string; type: 'local' | 'cdn' }> {
+  const soundfonts: Array<{ id: string; name: string; type: 'local' | 'cdn' }> = [
+    { id: 'cdn:FluidR3_GM', name: 'FluidR3 GM', type: 'cdn' },
+    { id: 'cdn:MusyngKite', name: 'MusyngKite', type: 'cdn' }
+  ]
+
+  const dir = getSoundfontDir()
+  if (fs.existsSync(dir)) {
+    const files = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.sf2'))
+    for (const file of files) {
+      const name = file.replace(/\.sf2$/i, '')
+      soundfonts.push({ id: `local:${file}`, name, type: 'local' })
+    }
+  }
+
+  return soundfonts
+}
 
 // Load .env file from project root
 // In dev: __dirname is dist-electron, so go up one level
@@ -18,6 +47,24 @@ config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
 app.use(express.json())
+
+// Serve soundfont files
+app.get('/soundfont/:filename', (req, res) => {
+  const filename = req.params.filename
+  // Security: only allow .sf2 files and prevent path traversal
+  if (!filename.endsWith('.sf2') || filename.includes('..') || filename.includes('/')) {
+    return res.status(400).send('Invalid filename')
+  }
+
+  const soundfontPath = path.join(getSoundfontDir(), filename)
+  if (!fs.existsSync(soundfontPath)) {
+    return res.status(404).send('Soundfont not found')
+  }
+
+  res.setHeader('Content-Type', 'application/octet-stream')
+  res.setHeader('Cache-Control', 'public, max-age=86400') // Cache for 24 hours
+  res.sendFile(soundfontPath)
+})
 
 // Store WebSocket clients for broadcasting
 const wsClients: WebSocket[] = []
@@ -847,7 +894,7 @@ function getMobileAppHTML(): string {
     fetch('/api/queue').then(r => r.json()).then(renderQueue).catch(() => {});
     loadHomeContent();
 
-    // Audio Preview System with Soundfont
+    // Audio Preview System with Soundfont (FluidR3_GM for better quality)
     let audioContext = null;
     let pianoPlayer = null;
     let currentPreviewId = null;
@@ -869,10 +916,10 @@ function getMobileAppHTML(): string {
       try {
         const ctx = getAudioContext();
         pianoPlayer = await Soundfont.instrument(ctx, 'acoustic_grand_piano', {
-          soundfont: 'MusyngKite',
+          soundfont: 'FluidR3_GM',
           gain: 2.0
         });
-        console.log('Piano soundfont loaded');
+        console.log('Piano soundfont loaded (FluidR3_GM)');
         return pianoPlayer;
       } catch (e) {
         console.error('Failed to load piano:', e);

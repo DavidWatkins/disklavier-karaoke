@@ -83,7 +83,10 @@ try {
     onSettingsChanged: (callback: (data: { key: string; value: unknown }) => void) => {
       ipcRenderer.on('settings:changed', (_event: unknown, data: { key: string; value: unknown }) => callback(data))
       return () => ipcRenderer.removeAllListeners('settings:changed')
-    }
+    },
+
+    // Soundfont management
+    listSoundfonts: () => ipcRenderer.invoke('soundfont:list')
   })
   console.log('=== PRELOAD SCRIPT LOADED SUCCESSFULLY ===')
 } catch (error) {
@@ -129,6 +132,7 @@ declare global {
       clearQueue: () => Promise<void>
       updateSetting: (key: string, value: unknown) => Promise<boolean>
       onSettingsChanged: (callback: (data: { key: string; value: unknown }) => void) => () => void
+      listSoundfonts: () => Promise<Array<{ id: string; name: string; type: 'local' | 'cdn' }>>
     }
   }
 }

@@ -15,6 +15,12 @@ interface ScanProgress {
   errors: number
 }
 
+interface SoundfontOption {
+  id: string
+  name: string
+  type: 'local' | 'cdn'
+}
+
 export default function Controls() {
   const [catalogPath, setCatalogPath] = useState('/Users/david/Music/Karaoke')
   const [midiOutputs, setMidiOutputs] = useState<Array<{ name: string; id: string }>>([])
@@ -33,6 +39,11 @@ export default function Controls() {
   const [lyricsMode, setLyricsMode] = useState<'normal' | 'bouncing'>(() => {
     return (localStorage.getItem('lyricsMode') as 'normal' | 'bouncing') || 'normal'
   })
+  const [soundfonts, setSoundfonts] = useState<SoundfontOption[]>([])
+  const [selectedSoundfont, setSelectedSoundfont] = useState<string>(() => {
+    return localStorage.getItem('soundfontId') || 'cdn:FluidR3_GM'
+  })
+  const [loadingSoundfont, setLoadingSoundfont] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -43,6 +54,17 @@ export default function Controls() {
       window.electronAPI.onScanProgress?.((progress: ScanProgress) => {
         setScanProgress(progress)
       })
+
+      // Listen for settings changes from other windows
+      const unsubSettings = window.electronAPI.onSettingsChanged((data) => {
+        if (data.key === 'soundfontId' && typeof data.value === 'string') {
+          setSelectedSoundfont(data.value)
+        }
+      })
+
+      return () => {
+        unsubSettings()
+      }
     }
   }, [])
 
@@ -65,8 +87,35 @@ export default function Controls() {
       // Check if WiFi credentials are configured
       const ssid = await window.electronAPI.getWifiSSID?.()
       setWifiSSID(ssid)
+
+      // Load available soundfonts
+      const fonts = await window.electronAPI.listSoundfonts?.() || []
+      setSoundfonts(fonts)
+
+      // Re-read the selected soundfont from localStorage to ensure sync
+      const savedSoundfont = localStorage.getItem('soundfontId')
+      if (savedSoundfont) {
+        setSelectedSoundfont(savedSoundfont)
+      }
     } catch (error) {
       console.error('Failed to load settings:', error)
+    }
+  }
+
+  const handleSoundfontChange = async (soundfontId: string) => {
+    if (!window.electronAPI || loadingSoundfont) return
+
+    setLoadingSoundfont(true)
+    setSelectedSoundfont(soundfontId)
+    localStorage.setItem('soundfontId', soundfontId)
+
+    try {
+      // Broadcast to all windows so they can update their synthesizers
+      await window.electronAPI.updateSetting('soundfontId', soundfontId)
+    } catch (error) {
+      console.error('Failed to update soundfont:', error)
+    } finally {
+      setLoadingSoundfont(false)
     }
   }
 
@@ -295,6 +344,40 @@ export default function Controls() {
           >
             Refresh MIDI Devices
           </button>
+        </div>
+      </section>
+
+      {/* Audio Settings */}
+      <section className="mb-8">
+        <h3 className="text-lg font-medium text-gray-300 mb-4">Audio</h3>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">
+              Soundfont (Instrument Sounds)
+            </label>
+            <select
+              value={selectedSoundfont}
+              onChange={(e) => handleSoundfontChange(e.target.value)}
+              disabled={loadingSoundfont}
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+            >
+              {soundfonts.map((sf) => (
+                <option key={sf.id} value={sf.id}>
+                  {sf.name} {sf.type === 'cdn' ? '(streaming)' : '(local file)'}
+                </option>
+              ))}
+            </select>
+            {loadingSoundfont && (
+              <p className="text-xs text-yellow-400 mt-2">
+                Loading soundfont... This may take a moment for large files.
+              </p>
+            )}
+            <p className="text-xs text-gray-500 mt-2">
+              Affects the sound quality of non-piano instruments. Local SF2 files provide
+              better quality but require more memory. Place SF2 files in the soundfonts folder.
+            </p>
+          </div>
         </div>
       </section>
 

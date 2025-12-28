@@ -11,8 +11,8 @@ export default defineConfig({
       {
         entry: 'electron/main.ts',
         onstart(args) {
-          // Only start if not already running
-          args.startup(['--no-sandbox'], { env: { ...process.env, ELECTRON_START_URL: 'http://localhost:5173' } })
+          // Start Electron with our app
+          args.startup()
         },
         vite: {
           build: {

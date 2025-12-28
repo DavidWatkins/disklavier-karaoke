@@ -54,10 +54,18 @@ export default function AudioPlayer() {
       }
     })
 
+    // Listen for soundfont changes from settings
+    const unsubSettings = window.electronAPI.onSettingsChanged((data) => {
+      if (data.key === 'soundfontId' && typeof data.value === 'string') {
+        audioSynthesizer.loadSoundfont(data.value)
+      }
+    })
+
     return () => {
       unsubNoteOn()
       unsubNoteOff()
       unsubAllNotesOff()
+      unsubSettings()
     }
   }, [isInitialized])
 

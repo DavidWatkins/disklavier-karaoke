@@ -1,4 +1,6 @@
 import Soundfont, { Player, InstrumentName } from 'soundfont-player'
+// @ts-expect-error - sfumato doesn't have type definitions
+import { loadSoundfont, startPresetNote } from 'sfumato'
 
 // General MIDI instrument names for soundfont-player
 const GM_INSTRUMENTS: string[] = [
@@ -36,20 +38,46 @@ const GM_INSTRUMENTS: string[] = [
   'telephone_ring', 'helicopter', 'applause', 'gunshot'
 ]
 
+// CDN soundfont names
+type CdnSoundfontName = 'FluidR3_GM' | 'MusyngKite'
+
 interface ActiveNote {
-  player: Player
   stopFn: () => void
+}
+
+interface SF2Preset {
+  header: {
+    bank: number
+    preset: number
+    name: string
+  }
+  zones: unknown[]
+}
+
+interface SF2Soundfont {
+  presets: SF2Preset[]
 }
 
 class AudioSynthesizer {
   private audioContext: AudioContext | null = null
-  private instruments: Map<number, Player> = new Map()
-  private activeNotes: Map<string, ActiveNote> = new Map()
   private isInitialized = false
   private isMuted = false
-  private loadingInstruments: Set<number> = new Set()
   private gainNode: GainNode | null = null
+  private activeNotes: Map<string, ActiveNote> = new Map()
+
+  // CDN mode (soundfont-player)
+  private instruments: Map<number, Player> = new Map()
+  private loadingInstruments: Set<number> = new Set()
   private defaultInstrument: Player | null = null
+  private cdnSoundfontName: CdnSoundfontName = 'FluidR3_GM'
+
+  // Local SF2 mode (sfumato)
+  private sf2Soundfont: SF2Soundfont | null = null
+  private presetMap: Map<number, SF2Preset> = new Map() // program number -> preset
+
+  // Current mode
+  private currentSoundfontId: string = 'cdn:FluidR3_GM'
+  private isLoadingSoundfont = false
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return
@@ -62,24 +90,102 @@ class AudioSynthesizer {
     this.gainNode.gain.value = 0.8
     this.gainNode.connect(this.audioContext.destination)
 
-    // Load the default piano instrument (used for all channels initially)
-    try {
-      console.log('Loading default piano soundfont...')
-      this.defaultInstrument = await Soundfont.instrument(
-        this.audioContext,
-        'acoustic_grand_piano',
-        { gain: 2.0, soundfont: 'MusyngKite' }
-      )
-      console.log('Default piano soundfont loaded!')
-    } catch (error) {
-      console.error('Failed to load piano soundfont:', error)
+    // Load saved soundfont preference
+    const savedSoundfont = localStorage.getItem('soundfontId')
+    if (savedSoundfont) {
+      this.currentSoundfontId = savedSoundfont
     }
 
     this.isInitialized = true
-    console.log('Audio synthesizer initialized with SoundFont')
+    console.log('Audio synthesizer initialized')
+
+    // Load the selected soundfont
+    await this.loadSoundfont(this.currentSoundfontId)
   }
 
-  private async loadInstrument(program: number): Promise<Player | null> {
+  async loadSoundfont(soundfontId: string): Promise<void> {
+    if (!this.audioContext || this.isLoadingSoundfont) return
+
+    this.isLoadingSoundfont = true
+    console.log('Loading soundfont:', soundfontId)
+
+    // Stop all notes and clear old data
+    this.allNotesOff()
+
+    try {
+      if (soundfontId.startsWith('cdn:')) {
+        // CDN mode - use soundfont-player
+        const cdnName = soundfontId.replace('cdn:', '') as CdnSoundfontName
+        await this.loadCdnSoundfont(cdnName)
+        this.sf2Soundfont = null
+        this.presetMap.clear()
+      } else if (soundfontId.startsWith('local:')) {
+        // Local SF2 mode - use sfumato
+        const filename = soundfontId.replace('local:', '')
+        await this.loadLocalSoundfont(filename)
+        // Clear CDN instruments
+        this.instruments.clear()
+        this.defaultInstrument = null
+      }
+
+      this.currentSoundfontId = soundfontId
+      localStorage.setItem('soundfontId', soundfontId)
+      console.log('Soundfont loaded successfully:', soundfontId)
+    } catch (error) {
+      console.error('Failed to load soundfont:', error)
+      // Fall back to CDN if local fails
+      if (!soundfontId.startsWith('cdn:')) {
+        console.log('Falling back to CDN soundfont')
+        await this.loadCdnSoundfont('FluidR3_GM')
+        this.currentSoundfontId = 'cdn:FluidR3_GM'
+        localStorage.setItem('soundfontId', this.currentSoundfontId)
+      }
+    } finally {
+      this.isLoadingSoundfont = false
+    }
+  }
+
+  private async loadCdnSoundfont(soundfontName: CdnSoundfontName): Promise<void> {
+    if (!this.audioContext) return
+
+    // Clear existing instruments when switching CDN soundfonts
+    this.instruments.clear()
+    this.cdnSoundfontName = soundfontName
+
+    console.log(`Loading default piano soundfont (${soundfontName})...`)
+    this.defaultInstrument = await Soundfont.instrument(
+      this.audioContext,
+      'acoustic_grand_piano',
+      { gain: 2.0, soundfont: soundfontName }
+    )
+    console.log('Default piano soundfont loaded!')
+  }
+
+  private async loadLocalSoundfont(filename: string): Promise<void> {
+    if (!this.audioContext) return
+
+    // In Electron, we get the base URL from the location
+    // The web server runs on port 3333
+    const baseUrl = 'http://localhost:3333'
+    const url = `${baseUrl}/soundfont/${encodeURIComponent(filename)}`
+
+    console.log(`Loading SF2 from: ${url}`)
+    this.sf2Soundfont = await loadSoundfont(url)
+
+    // Build preset map (program number -> preset)
+    this.presetMap.clear()
+    if (this.sf2Soundfont?.presets) {
+      for (const preset of this.sf2Soundfont.presets) {
+        // Bank 0 is General MIDI
+        if (preset.header.bank === 0) {
+          this.presetMap.set(preset.header.preset, preset)
+        }
+      }
+      console.log(`Loaded ${this.presetMap.size} GM presets from SF2`)
+    }
+  }
+
+  private async loadCdnInstrument(program: number): Promise<Player | null> {
     if (!this.audioContext) return null
     if (this.instruments.has(program)) return this.instruments.get(program)!
     if (this.loadingInstruments.has(program)) return null
@@ -92,10 +198,10 @@ class AudioSynthesizer {
       const player = await Soundfont.instrument(
         this.audioContext,
         instrumentName as InstrumentName,
-        { gain: 2.0, soundfont: 'MusyngKite' }
+        { gain: 2.0, soundfont: this.cdnSoundfontName }
       )
       this.instruments.set(program, player)
-      console.log(`Loaded instrument: ${instrumentName}`)
+      console.log(`Loaded instrument: ${instrumentName} (${this.cdnSoundfontName})`)
       return player
     } catch (error) {
       console.error(`Failed to load ${instrumentName}:`, error)
@@ -114,29 +220,46 @@ class AudioSynthesizer {
     const noteKey = `${channel}-${midiNote}`
     const instrumentProgram = program ?? 0
 
-    // Try to get the specific instrument, fall back to default piano
-    let player = this.instruments.get(instrumentProgram)
-    if (!player) {
-      // Start loading the instrument in background
-      this.loadInstrument(instrumentProgram)
-      // Use default piano while loading
-      player = this.defaultInstrument ?? undefined
-    }
-    if (!player) return
-
     // Convert MIDI velocity (0-127) to gain (0-1)
     const gain = (velocity / 127) * 2.0
 
     try {
-      const playingNote = player.play(midiNote.toString(), this.audioContext.currentTime, {
-        gain,
-        duration: 10 // Long duration, we'll stop manually
-      })
+      if (this.sf2Soundfont) {
+        // Local SF2 mode using sfumato
+        const preset = this.presetMap.get(instrumentProgram) || this.presetMap.get(0)
+        if (!preset) {
+          console.warn('No preset found for program', instrumentProgram)
+          return
+        }
 
-      this.activeNotes.set(noteKey, {
-        player,
-        stopFn: () => playingNote.stop()
-      })
+        const stopFn = startPresetNote(
+          this.audioContext,
+          preset,
+          midiNote,
+          this.audioContext.currentTime
+        )
+
+        this.activeNotes.set(noteKey, { stopFn })
+      } else {
+        // CDN mode using soundfont-player
+        let player = this.instruments.get(instrumentProgram)
+        if (!player) {
+          // Start loading the instrument in background
+          this.loadCdnInstrument(instrumentProgram)
+          // Use default piano while loading
+          player = this.defaultInstrument ?? undefined
+        }
+        if (!player) return
+
+        const playingNote = player.play(midiNote.toString(), this.audioContext.currentTime, {
+          gain,
+          duration: 10 // Long duration, we'll stop manually
+        })
+
+        this.activeNotes.set(noteKey, {
+          stopFn: () => playingNote.stop()
+        })
+      }
     } catch (error) {
       // Silently ignore note errors
     }
@@ -199,10 +322,16 @@ class AudioSynthesizer {
     return this.isMuted
   }
 
+  getCurrentSoundfontId(): string {
+    return this.currentSoundfontId
+  }
+
   dispose(): void {
     this.allNotesOff()
     this.instruments.clear()
     this.defaultInstrument = null
+    this.sf2Soundfont = null
+    this.presetMap.clear()
     if (this.audioContext) {
       this.audioContext.close()
       this.audioContext = null

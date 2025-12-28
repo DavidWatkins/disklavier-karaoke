@@ -51,6 +51,9 @@ interface ElectronAPI {
   // Settings sync across windows
   updateSetting: (key: string, value: unknown) => Promise<boolean>
   onSettingsChanged: (callback: (data: { key: string; value: unknown }) => void) => () => void
+
+  // Soundfont management
+  listSoundfonts: () => Promise<Array<{ id: string; name: string; type: 'local' | 'cdn' }>>
 }
 
 declare global {

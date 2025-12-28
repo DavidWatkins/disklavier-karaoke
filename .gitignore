@@ -28,6 +28,8 @@ npm-debug.log*
 
 # Local files
 kar_files/
+soundfonts/
+soundfont-samples/
 *.sh
 
 # Test files

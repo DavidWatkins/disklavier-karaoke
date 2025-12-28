@@ -14,7 +14,7 @@ import {
   midiOutputManager,
   autoConnectDisklavier
 } from './midi/output.js'
-import { startWebServer, stopWebServer, broadcastQueue, getQRCode, getWifiQRCode, getWifiSSID } from './web/server.js'
+import { startWebServer, stopWebServer, broadcastQueue, getQRCode, getWifiQRCode, getWifiSSID, listSoundfonts } from './web/server.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -406,6 +406,11 @@ function registerIpcHandlers() {
   ipcMain.handle('settings:update', (_event, key: string, value: unknown) => {
     sendToAllWindows('settings:changed', { key, value })
     return true
+  })
+
+  // Soundfont management
+  ipcMain.handle('soundfont:list', () => {
+    return listSoundfonts()
   })
 
   // Guest web app
