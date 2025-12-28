@@ -902,9 +902,18 @@ function getMobileAppHTML(): string {
     let activeNotes = [];
     let loadingPiano = false;
 
-    function getAudioContext() {
+    async function getAudioContext() {
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      // iOS Safari requires resume() from user gesture
+      if (audioContext.state === 'suspended') {
+        try {
+          await audioContext.resume();
+          console.log('AudioContext resumed, state:', audioContext.state);
+        } catch (e) {
+          console.error('Failed to resume AudioContext:', e);
+        }
       }
       return audioContext;
     }
@@ -914,7 +923,8 @@ function getMobileAppHTML(): string {
       loadingPiano = true;
 
       try {
-        const ctx = getAudioContext();
+        const ctx = await getAudioContext();
+        console.log('Loading piano soundfont, AudioContext state:', ctx.state);
         pianoPlayer = await Soundfont.instrument(ctx, 'acoustic_grand_piano', {
           soundfont: 'FluidR3_GM',
           gain: 2.0
@@ -976,12 +986,8 @@ function getMobileAppHTML(): string {
         if (!res.ok) throw new Error('Failed to load preview');
 
         const data = await res.json();
-        const ctx = getAudioContext();
-
-        // iOS Safari requires resume() to be called from a user gesture
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
+        const ctx = await getAudioContext();
+        console.log('Playing preview, AudioContext state:', ctx.state);
 
         const audioStartTime = ctx.currentTime;
 
@@ -1009,12 +1015,19 @@ function getMobileAppHTML(): string {
       } catch (e) {
         console.error('Preview failed:', e);
         stopPreview();
-        showToast('Preview unavailable');
+        showToast('Preview failed: ' + (e.message || 'Unknown error'));
       }
     }
 
-    // Pre-load piano on first interaction
-    document.addEventListener('click', () => loadPiano(), { once: true });
+    // Pre-load piano on first interaction (iOS needs this from user gesture)
+    document.addEventListener('click', async () => {
+      try {
+        await getAudioContext(); // Ensure context is resumed
+        await loadPiano();
+      } catch (e) {
+        console.error('Failed to initialize audio:', e);
+      }
+    }, { once: true });
   </script>
 </body>
 </html>`
