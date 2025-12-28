@@ -180,32 +180,59 @@ export default function LyricsDisplay() {
         i === line.syllables.length - 1 || currentTime < line.syllables[i + 1].time
       )
 
+      // Calculate ball progress for arc animation (0 to 1 within current syllable)
+      let ballProgress = 0
+      if (isCurrentSyllable && i < line.syllables.length - 1) {
+        const syllableStart = syllable.time
+        const syllableEnd = line.syllables[i + 1].time
+        const syllableDuration = syllableEnd - syllableStart
+        if (syllableDuration > 0) {
+          ballProgress = Math.min(1, (currentTime - syllableStart) / syllableDuration)
+        }
+      }
+
       if (lyricsMode === 'bouncing') {
-        // Bouncing ball mode: show ball above current syllable
+        // Bouncing ball mode: ball arcs between syllables
+        // Use whitespace: pre-wrap to preserve spaces in syllables
         return (
           <span
             key={i}
-            className={`inline-block relative transition-colors duration-100 ${
-              isSung ? 'text-karaoke-current' : 'text-white/70'
-            }`}
+            className="relative"
+            style={{ whiteSpace: 'pre-wrap' }}
           >
+            <span className={`transition-colors duration-100 ${
+              isSung ? 'text-karaoke-current' : 'text-white/70'
+            }`}>
+              {syllable.text}
+            </span>
             {isCurrentSyllable && (
-              <span className="bouncing-ball absolute -top-10 left-1/2 -translate-x-1/2 text-2xl text-yellow-400">
+              <span
+                className="bouncing-ball-arc absolute text-2xl text-yellow-400 pointer-events-none"
+                style={{
+                  // Ball arcs from current syllable center towards next
+                  // Horizontal: starts at 50%, moves to ~150% (next syllable)
+                  left: `${50 + ballProgress * 100}%`,
+                  // Vertical: parabolic arc - highest at middle of progress
+                  top: `${-40 - Math.sin(ballProgress * Math.PI) * 20}px`,
+                  transform: 'translateX(-50%)',
+                  transition: 'none'
+                }}
+              >
                 ●
               </span>
             )}
-            {syllable.text}
           </span>
         )
       }
 
-      // Normal mode: color-based highlighting
+      // Normal mode: color-based highlighting (preserve whitespace)
       return (
         <span
           key={i}
           className={`transition-colors duration-100 ${
             isSung ? 'text-karaoke-current' : 'text-white/70'
           }`}
+          style={{ whiteSpace: 'pre-wrap' }}
         >
           {syllable.text}
         </span>
