@@ -36,6 +36,35 @@ body {
   @apply text-karaoke-upcoming;
 }
 
+/* Musical break styling */
+.lyrics-line.musical-break {
+  @apply text-3xl md:text-4xl italic;
+}
+
+.lyrics-line.musical-break.current {
+  @apply text-amber-400;
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.lyrics-line.musical-break.upcoming {
+  @apply text-amber-600/70;
+}
+
+.lyrics-line.musical-break.sung {
+  @apply text-amber-800/50;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

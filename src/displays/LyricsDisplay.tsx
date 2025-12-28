@@ -4,6 +4,7 @@ interface LyricLine {
   text: string
   startTime: number
   endTime: number
+  isMusicalBreak?: boolean
 }
 
 interface PlaybackState {
@@ -135,10 +136,11 @@ export default function LyricsDisplay() {
     }
   }, [currentLineIndex])
 
-  const getLineClass = (index: number) => {
-    if (index < currentLineIndex) return 'lyrics-line sung'
-    if (index === currentLineIndex) return 'lyrics-line current'
-    return 'lyrics-line upcoming'
+  const getLineClass = (index: number, line: LyricLine) => {
+    const baseClass = line.isMusicalBreak ? 'lyrics-line musical-break' : 'lyrics-line'
+    if (index < currentLineIndex) return `${baseClass} sung`
+    if (index === currentLineIndex) return `${baseClass} current`
+    return `${baseClass} upcoming`
   }
 
   return (
@@ -198,7 +200,7 @@ export default function LyricsDisplay() {
               return index >= current - 2 && index <= current + 2
             })
             .map(({ line, index }) => (
-              <p key={index} className={getLineClass(index)}>
+              <p key={index} className={getLineClass(index, line)}>
                 {line.text}
               </p>
             ))

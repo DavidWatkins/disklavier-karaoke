@@ -267,22 +267,20 @@ export function parseKarFileComplete(filePath: string): ParsedSong {
   }
 }
 
-/**
- * Group lyrics into lines for display
- * KAR files often have syllable-by-syllable lyrics
- */
-export function groupLyricsIntoLines(lyrics: LyricEvent[]): {
+export interface LyricLine {
   text: string
   startTime: number
   endTime: number
   syllables: LyricEvent[]
-}[] {
-  const lines: {
-    text: string
-    startTime: number
-    endTime: number
-    syllables: LyricEvent[]
-  }[] = []
+  isMusicalBreak?: boolean
+}
+
+/**
+ * Group lyrics into lines for display
+ * KAR files often have syllable-by-syllable lyrics
+ */
+export function groupLyricsIntoLines(lyrics: LyricEvent[]): LyricLine[] {
+  const lines: LyricLine[] = []
 
   let currentLine: LyricEvent[] = []
   let lineText = ''
@@ -338,7 +336,33 @@ export function groupLyricsIntoLines(lyrics: LyricEvent[]): {
     })
   }
 
-  return lines
+  // Insert musical break indicators for gaps > 5 seconds
+  const MUSICAL_BREAK_THRESHOLD = 5 // seconds
+  const linesWithBreaks: LyricLine[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    linesWithBreaks.push(lines[i])
+
+    // Check if there's a gap before the next line
+    if (i < lines.length - 1) {
+      const currentEnd = lines[i].endTime
+      const nextStart = lines[i + 1].startTime
+      const gap = nextStart - currentEnd
+
+      if (gap >= MUSICAL_BREAK_THRESHOLD) {
+        // Insert a musical break indicator
+        linesWithBreaks.push({
+          text: '🎵 Musical Break 🎵',
+          startTime: currentEnd,
+          endTime: nextStart,
+          syllables: [],
+          isMusicalBreak: true
+        })
+      }
+    }
+  }
+
+  return linesWithBreaks
 }
 
 /**
