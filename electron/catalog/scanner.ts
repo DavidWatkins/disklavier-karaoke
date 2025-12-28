@@ -1,8 +1,14 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
-import { catalogDb } from './database.js'
+import { catalogDb, type FileType } from './database.js'
 import { getSongMetadata, parseKarFile } from '../midi/parser.js'
+
+interface ScannedFile {
+  path: string
+  type: FileType
+  audioPath?: string // For CDG files, the associated MP3 path
+}
 
 // Common Spanish words for language detection
 const SPANISH_WORDS = new Set([
@@ -75,7 +81,18 @@ export interface ScanResult {
 }
 
 /**
- * Scan a directory for KAR and MIDI files
+ * Get CDG file duration by reading the audio file
+ * Returns duration in milliseconds, or 0 if unable to determine
+ */
+async function getCdgDuration(audioPath: string): Promise<number> {
+  // For now, return 0 - actual duration will be determined at playback
+  // A proper implementation would read the MP3 duration, but that requires
+  // additional libraries. The duration isn't critical for catalog display.
+  return 0
+}
+
+/**
+ * Scan a directory for KAR, MIDI, and CDG files
  */
 export async function scanCatalogDirectory(
   directoryPath: string,
@@ -83,8 +100,8 @@ export async function scanCatalogDirectory(
 ): Promise<ScanResult> {
   const startTime = Date.now()
 
-  // Find all .kar and .mid files
-  const files = findMidiFiles(directoryPath)
+  // Find all karaoke files (MIDI, KAR, CDG+MP3)
+  const files = findKaraokeFiles(directoryPath)
 
   const result: ScanResult = {
     total: files.length,
@@ -94,10 +111,11 @@ export async function scanCatalogDirectory(
     duration: 0
   }
 
-  console.log(`Found ${files.length} MIDI/KAR files to scan`)
+  console.log(`Found ${files.length} karaoke files to scan (MIDI/KAR/CDG)`)
 
   for (let i = 0; i < files.length; i++) {
-    const filePath = files[i]
+    const file = files[i]
+    const filePath = file.path
 
     try {
       // Check if file already exists in database
@@ -105,7 +123,6 @@ export async function scanCatalogDirectory(
 
       if (existing) {
         // Check if file has been modified
-        const stats = fs.statSync(filePath)
         const currentHash = getFileHash(filePath)
 
         if (existing.file_hash === currentHash) {
@@ -125,34 +142,60 @@ export async function scanCatalogDirectory(
         }
       }
 
-      // Parse the file
-      const metadata = getSongMetadata(filePath)
-
-      // Extract artist from filename if possible (common format: "Artist - Title.kar")
+      // Extract artist and title from filename (common format: "Artist - Title.ext")
+      const ext = path.extname(filePath)
+      const baseFilename = path.basename(filePath, ext)
       let artist = ''
-      let title = metadata.title
+      let title = baseFilename
 
-      const filenameMatch = path.basename(filePath, path.extname(filePath)).match(/^(.+?)\s*-\s*(.+)$/)
+      const filenameMatch = baseFilename.match(/^(.+?)\s*-\s*(.+)$/)
       if (filenameMatch) {
         artist = filenameMatch[1].trim()
         title = filenameMatch[2].trim()
       }
 
-      // Detect language from lyrics and title
-      const lyricsText = getLyricsText(filePath)
-      const language = detectLanguage(lyricsText, title)
+      if (file.type === 'midi') {
+        // Parse MIDI/KAR file for metadata
+        const metadata = getSongMetadata(filePath)
+        title = metadata.title || title
 
-      // Add to database
-      catalogDb.addSong({
-        file_path: filePath,
-        title,
-        artist,
-        duration_ms: metadata.duration,
-        has_lyrics: metadata.hasLyrics,
-        track_count: metadata.trackCount,
-        file_hash: getFileHash(filePath),
-        language
-      })
+        // Detect language from lyrics and title
+        const lyricsText = getLyricsText(filePath)
+        const language = detectLanguage(lyricsText, title)
+
+        // Add to database
+        catalogDb.addSong({
+          file_path: filePath,
+          title,
+          artist,
+          duration_ms: metadata.duration,
+          has_lyrics: metadata.hasLyrics,
+          track_count: metadata.trackCount,
+          file_hash: getFileHash(filePath),
+          language,
+          file_type: 'midi',
+          audio_path: null,
+          video_url: null
+        })
+      } else if (file.type === 'cdg') {
+        // CDG files have graphics, not parseable lyrics
+        // Duration would come from the audio file
+        const duration = await getCdgDuration(file.audioPath!)
+
+        catalogDb.addSong({
+          file_path: filePath,
+          title,
+          artist,
+          duration_ms: duration,
+          has_lyrics: true, // CDG files always have visual lyrics
+          track_count: 0,
+          file_hash: getFileHash(filePath),
+          language: 'en', // Default language for CDG (can't detect from graphics)
+          file_type: 'cdg',
+          audio_path: file.audioPath || null,
+          video_url: null
+        })
+      }
 
       result.added++
     } catch (error) {
@@ -185,16 +228,24 @@ export async function scanCatalogDirectory(
 }
 
 /**
- * Recursively find all MIDI and KAR files in a directory
+ * Recursively find all MIDI, KAR, and CDG files in a directory
+ * CDG files are only included if they have a matching MP3 file
+ * MIDI/KAR files take precedence over CDG files with the same base name
  */
-function findMidiFiles(directoryPath: string): string[] {
-  const files: string[] = []
-  const extensions = ['.kar', '.mid', '.midi']
+function findKaraokeFiles(directoryPath: string): ScannedFile[] {
+  const midiFiles: ScannedFile[] = []
+  const cdgFiles: Map<string, { cdgPath: string; mp3Path?: string }> = new Map()
+  const midiBasenames: Set<string> = new Set() // Track MIDI/KAR base names to avoid duplicates
+
+  const midiExtensions = ['.kar', '.mid', '.midi']
+  const audioExtensions = ['.mp3', '.ogg', '.wav', '.m4a']
 
   function scan(dir: string) {
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true })
+      const directoryFiles: Map<string, string[]> = new Map() // basename -> [full paths]
 
+      // First pass: collect all files by their base name
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name)
 
@@ -205,9 +256,39 @@ function findMidiFiles(directoryPath: string): string[] {
           }
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase()
-          if (extensions.includes(ext)) {
-            files.push(fullPath)
+          const baseName = path.basename(entry.name, ext).toLowerCase()
+
+          if (!directoryFiles.has(baseName)) {
+            directoryFiles.set(baseName, [])
           }
+          directoryFiles.get(baseName)!.push(fullPath)
+        }
+      }
+
+      // Second pass: process files by base name
+      for (const [baseName, files] of directoryFiles) {
+        let hasMidi = false
+        let cdgPath: string | null = null
+        let audioPath: string | null = null
+
+        for (const filePath of files) {
+          const ext = path.extname(filePath).toLowerCase()
+
+          if (midiExtensions.includes(ext)) {
+            // Found a MIDI/KAR file - add it directly
+            midiFiles.push({ path: filePath, type: 'midi' })
+            midiBasenames.add(baseName)
+            hasMidi = true
+          } else if (ext === '.cdg') {
+            cdgPath = filePath
+          } else if (audioExtensions.includes(ext)) {
+            audioPath = filePath
+          }
+        }
+
+        // If we have CDG + audio but no MIDI, track it
+        if (!hasMidi && cdgPath && audioPath) {
+          cdgFiles.set(baseName, { cdgPath, mp3Path: audioPath })
         }
       }
     } catch (error) {
@@ -216,7 +297,20 @@ function findMidiFiles(directoryPath: string): string[] {
   }
 
   scan(directoryPath)
-  return files
+
+  // Add CDG files that don't have MIDI equivalents
+  for (const [baseName, { cdgPath, mp3Path }] of cdgFiles) {
+    if (!midiBasenames.has(baseName) && mp3Path) {
+      midiFiles.push({ path: cdgPath, type: 'cdg', audioPath: mp3Path })
+    }
+  }
+
+  return midiFiles
+}
+
+// Legacy function for backward compatibility
+function findMidiFiles(directoryPath: string): string[] {
+  return findKaraokeFiles(directoryPath).map(f => f.path)
 }
 
 /**

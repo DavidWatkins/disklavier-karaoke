@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import BackgroundRenderer, { BackgroundType } from '../backgrounds/BackgroundRenderer'
+import CdgRenderer from './CdgRenderer'
 
 interface LyricSyllable {
   text: string
@@ -23,6 +24,9 @@ interface PlaybackState {
   artist: string
   singer: string
   videoUrl?: string | null
+  fileType?: 'midi' | 'cdg'
+  audioPath?: string | null
+  songId?: number
 }
 
 interface QueueItem {
@@ -387,12 +391,21 @@ export default function LyricsDisplay() {
         </div>
       </div>
 
-      {/* Lyrics area */}
+      {/* Lyrics/CDG area */}
       <div
         ref={containerRef}
         className="flex-1 flex flex-col items-center justify-center py-32 px-8 relative z-10"
       >
-        {lyrics.length > 0 ? (
+        {playbackState.fileType === 'cdg' && playbackState.songId && playbackState.audioPath ? (
+          // CDG mode: render graphics from CDG file with audio
+          <CdgRenderer
+            songId={playbackState.songId}
+            audioPath={playbackState.audioPath}
+            playing={playbackState.playing}
+            paused={playbackState.paused}
+          />
+        ) : lyrics.length > 0 ? (
+          // MIDI mode: show text lyrics
           // Show only 5 lines: 2 previous, current, 2 next
           lyrics
             .map((line, index) => ({ line, index }))

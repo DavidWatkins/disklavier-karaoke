@@ -3,6 +3,8 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { app } from 'electron'
 
+export type FileType = 'midi' | 'cdg'
+
 export interface Song {
   id: number
   file_path: string
@@ -14,6 +16,8 @@ export interface Song {
   file_hash: string
   language: string // 'en', 'es', or 'other'
   video_url: string | null // YouTube or other video URL for background
+  file_type: FileType // 'midi' for KAR/MID files, 'cdg' for CDG+MP3 files
+  audio_path: string | null // For CDG files: path to associated MP3
   created_at: string
   last_played_at: string | null
 }
@@ -109,6 +113,22 @@ class CatalogDatabase {
       // Column already exists, which is fine
     }
 
+    // Migration: add file_type column for CDG support
+    try {
+      this.db.exec(`ALTER TABLE songs ADD COLUMN file_type TEXT DEFAULT 'midi'`)
+      console.log('Added file_type column to songs table')
+    } catch {
+      // Column already exists, which is fine
+    }
+
+    // Migration: add audio_path column for CDG+MP3 files
+    try {
+      this.db.exec(`ALTER TABLE songs ADD COLUMN audio_path TEXT`)
+      console.log('Added audio_path column to songs table')
+    } catch {
+      // Column already exists, which is fine
+    }
+
     // Queue table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS queue (
@@ -144,8 +164,8 @@ class CatalogDatabase {
     if (!this.db) throw new Error('Database not initialized')
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO songs (file_path, title, artist, duration_ms, has_lyrics, track_count, file_hash, language)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO songs (file_path, title, artist, duration_ms, has_lyrics, track_count, file_hash, language, file_type, audio_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const result = stmt.run(
@@ -156,7 +176,9 @@ class CatalogDatabase {
       song.has_lyrics ? 1 : 0,
       song.track_count,
       song.file_hash,
-      song.language || 'en'
+      song.language || 'en',
+      song.file_type || 'midi',
+      song.audio_path || null
     )
 
     return result.lastInsertRowid as number

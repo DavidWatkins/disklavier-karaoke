@@ -8,6 +8,7 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { config } from 'dotenv'
 import { catalogDb } from '../catalog/database.js'
+import { settingsStore, type Settings } from '../settings/store.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -68,6 +69,36 @@ app.get('/soundfont/:filename', (req, res) => {
 
 // Store WebSocket clients for broadcasting
 const wsClients: WebSocket[] = []
+
+// Callback for when queue is modified via web API
+// This allows main process to also trigger Electron window updates and auto-play
+let onQueueModifiedCallback: ((queue: unknown) => void) | null = null
+
+export function onQueueModified(callback: (queue: unknown) => void): void {
+  onQueueModifiedCallback = callback
+}
+
+// Callback for when settings are modified via web API
+// This allows main process to send IPC updates to Electron windows
+let onSettingsChangedCallback: ((key: string, value: unknown) => void) | null = null
+
+export function onSettingsChanged(callback: (key: string, value: unknown) => void): void {
+  onSettingsChangedCallback = callback
+}
+
+// Callbacks for playback control from web API
+let playbackControlCallbacks: {
+  play?: () => void
+  pause?: () => void
+  stop?: () => void
+  skip?: () => void
+  seek?: (timeMs: number) => void
+  removeFromQueue?: (queueId: number) => void
+} = {}
+
+export function onPlaybackControl(callbacks: typeof playbackControlCallbacks): void {
+  playbackControlCallbacks = { ...playbackControlCallbacks, ...callbacks }
+}
 
 // Get local network IP
 function getLocalIP(): string {
@@ -190,6 +221,10 @@ app.post('/api/queue', (req, res) => {
     const queue = catalogDb.getQueue()
     // Broadcast queue update to all WebSocket clients
     broadcastQueue(queue)
+    // Notify main process to update Electron windows and trigger auto-play
+    if (onQueueModifiedCallback) {
+      onQueueModifiedCallback(queue)
+    }
     res.json({ success: true, queueId })
   } catch (error) {
     res.status(500).json({ error: 'Failed to add to queue' })
@@ -245,6 +280,250 @@ app.get('/api/preview/:songId', (req, res) => {
   }
 })
 
+// Serve audio files for CDG playback
+app.get('/api/audio/:songId', (req, res) => {
+  const songId = parseInt(req.params.songId)
+  if (isNaN(songId)) {
+    return res.status(400).json({ error: 'Invalid song ID' })
+  }
+
+  try {
+    const song = catalogDb.getSong(songId)
+    if (!song) {
+      return res.status(404).json({ error: 'Song not found' })
+    }
+
+    // Only serve audio for CDG files
+    if (song.file_type !== 'cdg' || !song.audio_path) {
+      return res.status(400).json({ error: 'Song does not have audio file' })
+    }
+
+    if (!fs.existsSync(song.audio_path)) {
+      return res.status(404).json({ error: 'Audio file not found' })
+    }
+
+    // Determine content type from extension
+    const ext = path.extname(song.audio_path).toLowerCase()
+    const contentTypes: Record<string, string> = {
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.wav': 'audio/wav',
+      '.m4a': 'audio/mp4'
+    }
+    const contentType = contentTypes[ext] || 'audio/mpeg'
+
+    // Support range requests for seeking
+    const stat = fs.statSync(song.audio_path)
+    const range = req.headers.range
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-')
+      const start = parseInt(parts[0], 10)
+      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+      const chunkSize = end - start + 1
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType
+      })
+
+      fs.createReadStream(song.audio_path, { start, end }).pipe(res)
+    } else {
+      res.writeHead(200, {
+        'Content-Length': stat.size,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes'
+      })
+
+      fs.createReadStream(song.audio_path).pipe(res)
+    }
+  } catch (error) {
+    console.error('Error serving audio:', error)
+    res.status(500).json({ error: 'Failed to serve audio' })
+  }
+})
+
+// Admin Portal API Endpoints
+
+// Get all settings
+app.get('/api/admin/settings', (_req, res) => {
+  res.json(settingsStore.getAll())
+})
+
+// Update a single setting
+app.put('/api/admin/settings/:key', (req, res) => {
+  const key = req.params.key as keyof Settings
+  const allSettings = settingsStore.getAll()
+
+  if (!(key in allSettings)) {
+    return res.status(400).json({ error: `Unknown setting: ${key}` })
+  }
+
+  const { value } = req.body
+  settingsStore.set(key, value)
+
+  // Broadcast change to all WebSocket clients
+  const message = JSON.stringify({ type: 'settings', key, value })
+  wsClients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message)
+    }
+  })
+
+  // Notify main process to update Electron windows via IPC
+  if (onSettingsChangedCallback) {
+    onSettingsChangedCallback(key, value)
+  }
+
+  res.json({ success: true, key, value })
+})
+
+// List available MIDI outputs (needs IPC to main process)
+app.get('/api/admin/midi-outputs', async (_req, res) => {
+  try {
+    // This returns cached info from the midi module
+    const { listMidiOutputs } = await import('../midi/output.js')
+    const outputs = listMidiOutputs()
+    res.json(outputs)
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to list MIDI outputs' })
+  }
+})
+
+// List available soundfonts
+app.get('/api/admin/soundfonts', (_req, res) => {
+  res.json(listSoundfonts())
+})
+
+// Validate a file or directory path
+app.post('/api/admin/validate-path', (req, res) => {
+  const { path: pathToValidate, type } = req.body
+
+  if (!pathToValidate) {
+    return res.status(400).json({ valid: false, error: 'Path is required' })
+  }
+
+  try {
+    const exists = fs.existsSync(pathToValidate)
+    if (!exists) {
+      return res.json({ valid: false, error: 'Path does not exist' })
+    }
+
+    const stats = fs.statSync(pathToValidate)
+    if (type === 'directory' && !stats.isDirectory()) {
+      return res.json({ valid: false, error: 'Path is not a directory' })
+    }
+    if (type === 'file' && !stats.isFile()) {
+      return res.json({ valid: false, error: 'Path is not a file' })
+    }
+
+    res.json({ valid: true })
+  } catch (error) {
+    res.json({ valid: false, error: 'Failed to validate path' })
+  }
+})
+
+// Get catalog stats
+app.get('/api/admin/catalog/stats', (_req, res) => {
+  try {
+    const count = catalogDb.getSongCount()
+    res.json({ songCount: count })
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get catalog stats' })
+  }
+})
+
+// Cleanup missing songs from catalog
+app.post('/api/admin/catalog/cleanup', (_req, res) => {
+  try {
+    const result = catalogDb.cleanupMissingSongs()
+    res.json(result)
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to cleanup catalog' })
+  }
+})
+
+// Reload database from disk
+app.post('/api/admin/catalog/reload', (_req, res) => {
+  try {
+    catalogDb.reload()
+    res.json({ success: true })
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reload database' })
+  }
+})
+
+// Playback control endpoints for admin portal
+app.post('/api/admin/playback/play', (_req, res) => {
+  if (playbackControlCallbacks.play) {
+    playbackControlCallbacks.play()
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Playback control not available' })
+  }
+})
+
+app.post('/api/admin/playback/pause', (_req, res) => {
+  if (playbackControlCallbacks.pause) {
+    playbackControlCallbacks.pause()
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Playback control not available' })
+  }
+})
+
+app.post('/api/admin/playback/stop', (_req, res) => {
+  if (playbackControlCallbacks.stop) {
+    playbackControlCallbacks.stop()
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Playback control not available' })
+  }
+})
+
+app.post('/api/admin/playback/skip', (_req, res) => {
+  if (playbackControlCallbacks.skip) {
+    playbackControlCallbacks.skip()
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Playback control not available' })
+  }
+})
+
+app.post('/api/admin/playback/seek', (req, res) => {
+  const { timeMs } = req.body
+  if (typeof timeMs !== 'number') {
+    return res.status(400).json({ error: 'timeMs is required' })
+  }
+  if (playbackControlCallbacks.seek) {
+    playbackControlCallbacks.seek(timeMs)
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Playback control not available' })
+  }
+})
+
+// Queue management for admin portal
+app.delete('/api/admin/queue/:queueId', (req, res) => {
+  const queueId = parseInt(req.params.queueId)
+  if (isNaN(queueId)) {
+    return res.status(400).json({ error: 'Invalid queue ID' })
+  }
+  if (playbackControlCallbacks.removeFromQueue) {
+    playbackControlCallbacks.removeFromQueue(queueId)
+    res.json({ success: true })
+  } else {
+    res.status(503).json({ error: 'Queue control not available' })
+  }
+})
+
+// Serve admin portal
+app.get('/admin', (_req, res) => {
+  res.send(getAdminPortalHTML())
+})
+
 // Serve mobile web app
 app.get('/', (_req, res) => {
   res.send(getMobileAppHTML())
@@ -253,6 +532,16 @@ app.get('/', (_req, res) => {
 // Broadcast queue to all WebSocket clients
 export function broadcastQueue(queue: unknown) {
   const message = JSON.stringify({ type: 'queue', data: queue })
+  wsClients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message)
+    }
+  })
+}
+
+// Broadcast playback state to all WebSocket clients
+export function broadcastPlayback(state: unknown) {
+  const message = JSON.stringify({ type: 'playback', data: state })
   wsClients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message)
@@ -1144,6 +1433,846 @@ function getMobileAppHTML(): string {
         console.error('Failed to initialize audio:', e);
       }
     }, { once: true });
+  </script>
+</body>
+</html>`
+}
+
+// Admin Portal HTML
+function getAdminPortalHTML(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Portal - Disklavier Karaoke</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: white;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .subtitle {
+      color: #888;
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .section {
+      background: #2a2a4e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .section h2 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section h2 .icon { font-size: 20px; }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 12px;
+      font-size: 15px;
+      border: 1px solid #3a3a6e;
+      border-radius: 8px;
+      background: #1a1a2e;
+      color: white;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: #667eea;
+    }
+    .toggle-group {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #3a3a6e;
+    }
+    .toggle-group:last-child {
+      border-bottom: none;
+    }
+    .toggle-label {
+      font-size: 14px;
+    }
+    .toggle {
+      position: relative;
+      width: 50px;
+      height: 28px;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: #3a3a6e;
+      border-radius: 28px;
+      transition: 0.3s;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+    .toggle input:checked + .toggle-slider {
+      background-color: #4CAF50;
+    }
+    .toggle input:checked + .toggle-slider:before {
+      transform: translateX(22px);
+    }
+    .btn {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:active { opacity: 0.8; }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .btn-secondary {
+      background: #3a3a6e;
+      color: white;
+    }
+    .btn-danger {
+      background: #c0392b;
+      color: white;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .status-connected {
+      background: #2d8a4e;
+      color: white;
+    }
+    .status-disconnected {
+      background: #c0392b;
+      color: white;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #3a3a6e;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-value {
+      font-size: 20px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #4CAF50;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      transition: transform 0.3s;
+      z-index: 200;
+    }
+    .toast.error { background: #c0392b; }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .connection-status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+    .connection-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #c0392b;
+    }
+    .connection-dot.connected { background: #4CAF50; }
+    .playback-controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .playback-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .playback-btn:hover { transform: scale(1.1); }
+    .playback-btn:active { transform: scale(0.95); }
+    .playback-btn.play { background: #4CAF50; color: white; }
+    .playback-btn.pause { background: #ff9800; color: white; }
+    .playback-btn.stop { background: #f44336; color: white; }
+    .playback-btn.skip { background: #3a3a6e; color: white; }
+    .now-playing {
+      text-align: center;
+      padding: 16px;
+      background: #1e3a5f;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .now-playing .song-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .now-playing .singer {
+      color: #4dabf7;
+      font-size: 14px;
+    }
+    .now-playing .status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #3a3a6e;
+      border-radius: 4px;
+      margin: 12px 0;
+      cursor: pointer;
+      position: relative;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 4px;
+      transition: width 0.1s;
+    }
+    .progress-time {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #888;
+    }
+    .queue-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .queue-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .queue-item.playing {
+      background: #1e3a5f;
+      border-left: 3px solid #4CAF50;
+    }
+    .queue-item .queue-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .queue-item .queue-title {
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .queue-item .queue-singer {
+      font-size: 12px;
+      color: #4dabf7;
+    }
+    .queue-item .remove-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: #c0392b;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .queue-item .remove-btn:hover { opacity: 0.8; }
+    .empty-queue {
+      text-align: center;
+      color: #666;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="connection-status">
+    <div class="connection-dot" id="connectionDot"></div>
+    <span id="connectionText">Connecting...</span>
+  </div>
+
+  <div class="container">
+    <h1>Admin Portal</h1>
+    <p class="subtitle">Configure Disklavier Karaoke settings remotely</p>
+
+    <!-- Playback Controls -->
+    <div class="section">
+      <h2><span class="icon">🎶</span> Now Playing</h2>
+      <div class="now-playing" id="nowPlaying">
+        <div class="song-title" id="nowPlayingTitle">No song playing</div>
+        <div class="singer" id="nowPlayingSinger"></div>
+        <div class="status" id="nowPlayingStatus">Stopped</div>
+      </div>
+      <div class="progress-bar" id="progressBar" onclick="seekTo(event)">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="progress-time">
+        <span id="currentTime">0:00</span>
+        <span id="totalTime">0:00</span>
+      </div>
+      <div class="playback-controls">
+        <button class="playback-btn stop" onclick="stopPlayback()" title="Stop">⏹</button>
+        <button class="playback-btn play" id="playPauseBtn" onclick="togglePlayPause()" title="Play/Pause">▶</button>
+        <button class="playback-btn skip" onclick="skipSong()" title="Skip">⏭</button>
+      </div>
+    </div>
+
+    <!-- Queue -->
+    <div class="section">
+      <h2><span class="icon">📋</span> Queue</h2>
+      <div class="queue-list" id="queueList">
+        <div class="empty-queue">Queue is empty</div>
+      </div>
+    </div>
+
+    <!-- Audio Settings -->
+    <div class="section">
+      <h2><span class="icon">🎵</span> Audio Settings</h2>
+      <div class="form-group">
+        <label>Soundfont</label>
+        <select id="soundfontId">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- MIDI Settings -->
+    <div class="section">
+      <h2><span class="icon">🎹</span> MIDI Settings</h2>
+      <div class="form-group">
+        <label>MIDI Output Device</label>
+        <select id="midiOutputName">
+          <option value="">None (Software Synth)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>MIDI Delay (ms)</label>
+        <input type="number" id="midiDelayMs" min="0" max="500" step="10" value="0">
+      </div>
+    </div>
+
+    <!-- Display Settings -->
+    <div class="section">
+      <h2><span class="icon">🖥️</span> Display Settings</h2>
+      <div class="form-group">
+        <label>Lyrics Mode</label>
+        <select id="lyricsMode">
+          <option value="normal">Normal</option>
+          <option value="bouncing">Bouncing Ball</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Background Type</label>
+        <select id="backgroundType">
+          <option value="none">None</option>
+          <option value="starfield">Starfield</option>
+          <option value="matrix">Matrix</option>
+          <option value="gradient">Gradient</option>
+          <option value="visualizer">Visualizer</option>
+          <option value="video">Video File</option>
+          <option value="youtube">YouTube</option>
+        </select>
+      </div>
+      <div class="form-group" id="videoPathGroup" style="display: none;">
+        <label>Video File Path</label>
+        <input type="text" id="backgroundVideoPath" placeholder="/path/to/video.mp4">
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label">Enable YouTube Backgrounds</span>
+        <label class="toggle">
+          <input type="checkbox" id="youtubeBackgroundEnabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label">Show WiFi QR Code</span>
+        <label class="toggle">
+          <input type="checkbox" id="showWifiQR">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Catalog Settings -->
+    <div class="section">
+      <h2><span class="icon">📁</span> Catalog</h2>
+      <div class="form-group">
+        <label>Catalog Path</label>
+        <input type="text" id="catalogPath" placeholder="/path/to/karaoke/files">
+      </div>
+      <div class="stat-row">
+        <span>Total Songs</span>
+        <span class="stat-value" id="songCount">-</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="reloadDatabase()">Reload Database</button>
+        <button class="btn btn-danger" onclick="cleanupCatalog()">Cleanup Missing</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Saved!</div>
+
+  <script>
+    let ws = null;
+    let settings = {};
+    let debounceTimers = {};
+    let playbackState = { playing: false, paused: false, currentTime: 0, duration: 0 };
+    let queue = [];
+
+    // WebSocket connection for real-time sync
+    function connectWS() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(protocol + '//' + location.host);
+
+      ws.onopen = () => {
+        document.getElementById('connectionDot').classList.add('connected');
+        document.getElementById('connectionText').textContent = 'Connected';
+      };
+
+      ws.onclose = () => {
+        document.getElementById('connectionDot').classList.remove('connected');
+        document.getElementById('connectionText').textContent = 'Disconnected';
+        setTimeout(connectWS, 2000);
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'settings') {
+          settings[msg.key] = msg.value;
+          updateFieldValue(msg.key, msg.value);
+        } else if (msg.type === 'queue') {
+          queue = msg.data || [];
+          renderQueue();
+          updateNowPlaying();
+        } else if (msg.type === 'playback') {
+          playbackState = msg.data || { playing: false, paused: false, currentTime: 0, duration: 0 };
+          updateNowPlaying();
+          updateProgress();
+        }
+      };
+    }
+    connectWS();
+
+    // Playback control functions
+    async function togglePlayPause() {
+      try {
+        if (playbackState.playing && !playbackState.paused) {
+          await fetch('/api/admin/playback/pause', { method: 'POST' });
+        } else {
+          await fetch('/api/admin/playback/play', { method: 'POST' });
+        }
+      } catch (e) {
+        showToast('Playback control failed', true);
+      }
+    }
+
+    async function stopPlayback() {
+      try {
+        await fetch('/api/admin/playback/stop', { method: 'POST' });
+        showToast('Stopped');
+      } catch (e) {
+        showToast('Stop failed', true);
+      }
+    }
+
+    async function skipSong() {
+      try {
+        await fetch('/api/admin/playback/skip', { method: 'POST' });
+        showToast('Skipped');
+      } catch (e) {
+        showToast('Skip failed', true);
+      }
+    }
+
+    function seekTo(event) {
+      const bar = document.getElementById('progressBar');
+      const rect = bar.getBoundingClientRect();
+      const percent = (event.clientX - rect.left) / rect.width;
+      const timeMs = percent * playbackState.duration;
+
+      fetch('/api/admin/playback/seek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeMs })
+      }).catch(() => showToast('Seek failed', true));
+    }
+
+    async function removeFromQueue(queueId) {
+      try {
+        await fetch('/api/admin/queue/' + queueId, { method: 'DELETE' });
+        showToast('Removed from queue');
+      } catch (e) {
+        showToast('Remove failed', true);
+      }
+    }
+
+    function formatTime(ms) {
+      const seconds = Math.floor(ms / 1000);
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return mins + ':' + secs.toString().padStart(2, '0');
+    }
+
+    function updateNowPlaying() {
+      const playingItem = queue.find(q => q.status === 'playing');
+      const titleEl = document.getElementById('nowPlayingTitle');
+      const singerEl = document.getElementById('nowPlayingSinger');
+      const statusEl = document.getElementById('nowPlayingStatus');
+      const playBtn = document.getElementById('playPauseBtn');
+
+      // Use playbackState to determine if something is actually playing
+      const isPlaying = playbackState.playing && !playbackState.paused;
+      const isPaused = playbackState.playing && playbackState.paused;
+
+      if (playingItem || playbackState.playing) {
+        titleEl.textContent = playingItem?.title || playbackState.songName || 'Unknown Song';
+        singerEl.textContent = playingItem?.singer_name ? 'Singing: ' + playingItem.singer_name : (playbackState.singer ? 'Singing: ' + playbackState.singer : '');
+
+        if (isPaused) {
+          statusEl.textContent = 'Paused';
+          playBtn.textContent = '▶';
+          playBtn.classList.remove('pause');
+          playBtn.classList.add('play');
+        } else if (isPlaying) {
+          statusEl.textContent = 'Playing';
+          playBtn.textContent = '⏸';
+          playBtn.classList.add('pause');
+          playBtn.classList.remove('play');
+        } else {
+          statusEl.textContent = 'Stopped';
+          playBtn.textContent = '▶';
+          playBtn.classList.remove('pause');
+          playBtn.classList.add('play');
+        }
+      } else {
+        titleEl.textContent = 'No song playing';
+        singerEl.textContent = '';
+        statusEl.textContent = 'Stopped';
+        playBtn.textContent = '▶';
+        playBtn.classList.remove('pause');
+        playBtn.classList.add('play');
+      }
+    }
+
+    function updateProgress() {
+      const percent = playbackState.duration > 0
+        ? (playbackState.currentTime / playbackState.duration) * 100
+        : 0;
+      document.getElementById('progressFill').style.width = percent + '%';
+      document.getElementById('currentTime').textContent = formatTime(playbackState.currentTime);
+      document.getElementById('totalTime').textContent = formatTime(playbackState.duration);
+    }
+
+    function renderQueue() {
+      const list = document.getElementById('queueList');
+      const activeItems = queue.filter(q => q.status === 'playing' || q.status === 'pending');
+
+      if (activeItems.length === 0) {
+        list.innerHTML = '<div class="empty-queue">Queue is empty</div>';
+        return;
+      }
+
+      list.innerHTML = activeItems.map(item =>
+        '<div class="queue-item ' + (item.status === 'playing' ? 'playing' : '') + '">' +
+          '<div class="queue-info">' +
+            '<div class="queue-title">' + escapeHtml(item.title) + '</div>' +
+            '<div class="queue-singer">' + escapeHtml(item.singer_name) + '</div>' +
+          '</div>' +
+          (item.status !== 'playing' ?
+            '<button class="remove-btn" onclick="removeFromQueue(' + item.id + ')" title="Remove">×</button>'
+            : '') +
+        '</div>'
+      ).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    // Load queue on page load
+    async function loadQueue() {
+      try {
+        const res = await fetch('/api/queue');
+        queue = await res.json();
+        renderQueue();
+        updateNowPlaying();
+      } catch (e) {
+        console.error('Failed to load queue:', e);
+      }
+    }
+
+    // Load initial data
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/admin/settings');
+        settings = await res.json();
+        Object.entries(settings).forEach(([key, value]) => {
+          updateFieldValue(key, value);
+        });
+      } catch (e) {
+        console.error('Failed to load settings:', e);
+      }
+    }
+
+    async function loadMidiOutputs() {
+      try {
+        const res = await fetch('/api/admin/midi-outputs');
+        const outputs = await res.json();
+        const select = document.getElementById('midiOutputName');
+        select.innerHTML = '<option value="">None (Software Synth)</option>';
+        outputs.forEach(output => {
+          const opt = document.createElement('option');
+          opt.value = output.name;
+          opt.textContent = output.name;
+          select.appendChild(opt);
+        });
+        // Restore selection
+        if (settings.midiOutputName) {
+          select.value = settings.midiOutputName;
+        }
+      } catch (e) {
+        console.error('Failed to load MIDI outputs:', e);
+      }
+    }
+
+    async function loadSoundfonts() {
+      try {
+        const res = await fetch('/api/admin/soundfonts');
+        const soundfonts = await res.json();
+        const select = document.getElementById('soundfontId');
+        select.innerHTML = '';
+        soundfonts.forEach(sf => {
+          const opt = document.createElement('option');
+          opt.value = sf.id;
+          opt.textContent = sf.name + (sf.type === 'cdn' ? ' (CDN)' : ' (Local)');
+          select.appendChild(opt);
+        });
+        // Restore selection
+        if (settings.soundfontId) {
+          select.value = settings.soundfontId;
+        }
+      } catch (e) {
+        console.error('Failed to load soundfonts:', e);
+      }
+    }
+
+    async function loadCatalogStats() {
+      try {
+        const res = await fetch('/api/admin/catalog/stats');
+        const stats = await res.json();
+        document.getElementById('songCount').textContent = stats.songCount.toLocaleString();
+      } catch (e) {
+        console.error('Failed to load catalog stats:', e);
+      }
+    }
+
+    function updateFieldValue(key, value) {
+      const el = document.getElementById(key);
+      if (!el) return;
+
+      if (el.type === 'checkbox') {
+        el.checked = !!value;
+      } else {
+        el.value = value ?? '';
+      }
+
+      // Show/hide video path field
+      if (key === 'backgroundType') {
+        document.getElementById('videoPathGroup').style.display =
+          value === 'video' ? 'block' : 'none';
+      }
+    }
+
+    // Save setting with debounce
+    function saveSetting(key, value) {
+      clearTimeout(debounceTimers[key]);
+      debounceTimers[key] = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/admin/settings/' + key, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value })
+          });
+          if (res.ok) {
+            settings[key] = value;
+            showToast('Saved!');
+          } else {
+            showToast('Save failed', true);
+          }
+        } catch (e) {
+          console.error('Failed to save:', e);
+          showToast('Save failed', true);
+        }
+      }, 300);
+    }
+
+    // Event listeners for all settings fields
+    function setupEventListeners() {
+      // Select fields
+      ['soundfontId', 'midiOutputName', 'lyricsMode', 'backgroundType'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('change', () => {
+            const value = el.value;
+            saveSetting(id, value);
+
+            // Show/hide video path
+            if (id === 'backgroundType') {
+              document.getElementById('videoPathGroup').style.display =
+                value === 'video' ? 'block' : 'none';
+            }
+          });
+        }
+      });
+
+      // Number/text fields
+      ['midiDelayMs', 'backgroundVideoPath', 'catalogPath'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', () => {
+            let value = el.value;
+            if (el.type === 'number') {
+              value = parseInt(value) || 0;
+            }
+            saveSetting(id, value);
+          });
+        }
+      });
+
+      // Toggle switches
+      ['youtubeBackgroundEnabled', 'showWifiQR'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('change', () => {
+            saveSetting(id, el.checked);
+          });
+        }
+      });
+    }
+
+    async function reloadDatabase() {
+      try {
+        const res = await fetch('/api/admin/catalog/reload', { method: 'POST' });
+        if (res.ok) {
+          showToast('Database reloaded');
+          loadCatalogStats();
+        } else {
+          showToast('Reload failed', true);
+        }
+      } catch (e) {
+        showToast('Reload failed', true);
+      }
+    }
+
+    async function cleanupCatalog() {
+      if (!confirm('Remove songs with missing files from the catalog?')) return;
+
+      try {
+        const res = await fetch('/api/admin/catalog/cleanup', { method: 'POST' });
+        const result = await res.json();
+        showToast('Removed ' + result.removed + ' missing songs');
+        loadCatalogStats();
+      } catch (e) {
+        showToast('Cleanup failed', true);
+      }
+    }
+
+    function showToast(msg, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = 'toast' + (isError ? ' error' : '');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Initialize
+    loadSettings().then(() => {
+      loadMidiOutputs();
+      loadSoundfonts();
+      loadCatalogStats();
+      setupEventListeners();
+    });
+    loadQueue();
   </script>
 </body>
 </html>`

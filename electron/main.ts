@@ -14,7 +14,8 @@ import {
   midiOutputManager,
   autoConnectDisklavier
 } from './midi/output.js'
-import { startWebServer, stopWebServer, broadcastQueue, getQRCode, getWifiQRCode, getWifiSSID, listSoundfonts } from './web/server.js'
+import { startWebServer, stopWebServer, broadcastQueue, broadcastPlayback, getQRCode, getWifiQRCode, getWifiSSID, listSoundfonts, onQueueModified, onSettingsChanged, onPlaybackControl } from './web/server.js'
+import { settingsStore, type Settings } from './settings/store.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -121,7 +122,9 @@ function sendToAllWindows(channel: string, data: unknown) {
 
 // Helper to send playback state with video URL
 function sendPlaybackState(state: unknown) {
-  sendToAllWindows('playback:update', { ...(state as object), videoUrl: currentVideoUrl })
+  const stateWithVideo = { ...(state as object), videoUrl: currentVideoUrl }
+  sendToAllWindows('playback:update', stateWithVideo)
+  broadcastPlayback(stateWithVideo) // Send to admin portal and web clients
 }
 
 // Setup MIDI player event handlers
@@ -422,8 +425,25 @@ function registerIpcHandlers() {
 
   // Settings sync across windows
   ipcMain.handle('settings:update', (_event, key: string, value: unknown) => {
+    // Persist to settings store if it's a known setting key
+    const allSettings = settingsStore.getAll()
+    if (key in allSettings) {
+      settingsStore.set(key as keyof Settings, value as Settings[keyof Settings])
+    }
     sendToAllWindows('settings:changed', { key, value })
     return true
+  })
+
+  ipcMain.handle('settings:getAll', () => {
+    return settingsStore.getAll()
+  })
+
+  ipcMain.handle('settings:get', (_event, key: string) => {
+    const allSettings = settingsStore.getAll()
+    if (key in allSettings) {
+      return settingsStore.get(key as keyof Settings)
+    }
+    return undefined
   })
 
   // Soundfont management
@@ -468,6 +488,9 @@ function registerIpcHandlers() {
 
 // App lifecycle
 app.whenReady().then(async () => {
+  // Initialize settings store
+  settingsStore.initialize()
+
   // Initialize database
   catalogDb.initialize()
 
@@ -490,6 +513,68 @@ app.whenReady().then(async () => {
   try {
     const { url, qrCode } = await startWebServer()
     console.log('Guest web app available at:', url)
+
+    // Register callback for when queue is modified via web API
+    // This ensures Electron windows also get updated and auto-play works
+    onQueueModified((queue) => {
+      sendToAllWindows('queue:update', queue)
+
+      // If nothing is playing, start playing
+      const state = midiPlayer.getState()
+      if (!state.playing) {
+        playNextInQueue()
+      }
+    })
+
+    // Register callback for when settings are changed via web API
+    // This ensures Electron windows also get updated via IPC
+    onSettingsChanged((key, value) => {
+      sendToAllWindows('settings:changed', { key, value })
+    })
+
+    // Register playback control callbacks for admin portal
+    onPlaybackControl({
+      play: () => {
+        const state = midiPlayer.getState()
+        if (state.paused) {
+          midiPlayer.play()
+        } else if (!state.playing) {
+          playNextInQueue()
+        }
+        sendPlaybackState(midiPlayer.getState())
+      },
+      pause: () => {
+        midiPlayer.pause()
+        sendPlaybackState(midiPlayer.getState())
+      },
+      stop: () => {
+        midiPlayer.stop()
+        currentVideoUrl = null
+        sendPlaybackState(midiPlayer.getState())
+      },
+      skip: () => {
+        midiPlayer.stop()
+        const queue = catalogDb.getQueue()
+        const playing = queue.find(q => q.status === 'playing')
+        if (playing) {
+          catalogDb.setQueueItemStatus(playing.id, 'skipped')
+        }
+        playNextInQueue()
+        const updatedQueue = catalogDb.getQueue()
+        sendToAllWindows('queue:update', updatedQueue)
+        broadcastQueue(updatedQueue)
+      },
+      seek: (timeMs: number) => {
+        midiPlayer.seek(timeMs)
+        sendPlaybackState(midiPlayer.getState())
+      },
+      removeFromQueue: (queueId: number) => {
+        catalogDb.removeFromQueue(queueId)
+        const queue = catalogDb.getQueue()
+        sendToAllWindows('queue:update', queue)
+        broadcastQueue(queue)
+      }
+    })
   } catch (error) {
     console.error('Failed to start web server:', error)
   }
