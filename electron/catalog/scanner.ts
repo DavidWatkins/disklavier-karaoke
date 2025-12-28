@@ -2,7 +2,60 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
 import { catalogDb } from './database.js'
-import { getSongMetadata } from '../midi/parser.js'
+import { getSongMetadata, parseKarFile } from '../midi/parser.js'
+
+// Common Spanish words for language detection
+const SPANISH_WORDS = new Set([
+  'que', 'de', 'la', 'el', 'los', 'las', 'un', 'una', 'con', 'por', 'para',
+  'se', 'yo', 'tu', 'mi', 'su', 'nos', 'te', 'me', 'es', 'en', 'del', 'al',
+  'como', 'pero', 'mas', 'cuando', 'donde', 'quien', 'este', 'esta', 'ese',
+  'esa', 'todo', 'toda', 'todos', 'nada', 'siempre', 'nunca', 'amor', 'vida',
+  'corazon', 'tiempo', 'quiero', 'siento', 'puedo', 'quieres', 'vamos',
+  'porque', 'solo', 'muy', 'asi', 'bien', 'mal', 'hoy', 'ayer', 'noche',
+  'dia', 'ti', 'contigo', 'sin', 'ahora', 'aqui', 'alla', 'tan', 'tus'
+])
+
+/**
+ * Detect the language of lyrics text
+ * Returns 'es' for Spanish, 'en' for English (default)
+ */
+function detectLanguage(text: string, title: string): string {
+  const combined = `${title} ${text}`.toLowerCase()
+
+  // Check for Spanish-specific characters
+  const hasSpanishChars = /[ñáéíóúü¿¡]/.test(combined)
+
+  // Count Spanish word matches
+  const words = combined.split(/[\s,.\-!?¿¡'"]+/).filter(w => w.length > 1)
+  let spanishWordCount = 0
+
+  for (const word of words) {
+    if (SPANISH_WORDS.has(word)) {
+      spanishWordCount++
+    }
+  }
+
+  // Heuristic: if has Spanish chars or >15% Spanish words, mark as Spanish
+  const spanishRatio = words.length > 0 ? spanishWordCount / words.length : 0
+
+  if (hasSpanishChars || spanishRatio > 0.15) {
+    return 'es'
+  }
+
+  return 'en'
+}
+
+/**
+ * Get lyrics text from a file for language detection
+ */
+function getLyricsText(filePath: string): string {
+  try {
+    const { lyrics } = parseKarFile(filePath)
+    return lyrics.map(line => line.text).join(' ')
+  } catch {
+    return ''
+  }
+}
 
 export interface ScanProgress {
   total: number
@@ -85,6 +138,10 @@ export async function scanCatalogDirectory(
         title = filenameMatch[2].trim()
       }
 
+      // Detect language from lyrics and title
+      const lyricsText = getLyricsText(filePath)
+      const language = detectLanguage(lyricsText, title)
+
       // Add to database
       catalogDb.addSong({
         file_path: filePath,
@@ -93,7 +150,8 @@ export async function scanCatalogDirectory(
         duration_ms: metadata.duration,
         has_lyrics: metadata.hasLyrics,
         track_count: metadata.trackCount,
-        file_hash: getFileHash(filePath)
+        file_hash: getFileHash(filePath),
+        language
       })
 
       result.added++

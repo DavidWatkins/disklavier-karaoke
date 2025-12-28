@@ -12,6 +12,7 @@ export interface Song {
   has_lyrics: boolean
   track_count: number
   file_hash: string
+  language: string // 'en', 'es', or 'other'
   created_at: string
   last_played_at: string | null
 }
@@ -60,6 +61,7 @@ class CatalogDatabase {
         has_lyrics BOOLEAN DEFAULT 0,
         track_count INTEGER DEFAULT 0,
         file_hash TEXT,
+        language TEXT DEFAULT 'en',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_played_at DATETIME
       );
@@ -67,7 +69,16 @@ class CatalogDatabase {
       CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title);
       CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
       CREATE INDEX IF NOT EXISTS idx_songs_file_path ON songs(file_path);
+      CREATE INDEX IF NOT EXISTS idx_songs_language ON songs(language);
     `)
+
+    // Migration: add language column if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE songs ADD COLUMN language TEXT DEFAULT 'en'`)
+      console.log('Added language column to songs table')
+    } catch {
+      // Column already exists
+    }
 
     // Queue table
     this.db.exec(`
@@ -104,8 +115,8 @@ class CatalogDatabase {
     if (!this.db) throw new Error('Database not initialized')
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO songs (file_path, title, artist, duration_ms, has_lyrics, track_count, file_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO songs (file_path, title, artist, duration_ms, has_lyrics, track_count, file_hash, language)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const result = stmt.run(
@@ -115,7 +126,8 @@ class CatalogDatabase {
       song.duration_ms,
       song.has_lyrics ? 1 : 0,
       song.track_count,
-      song.file_hash
+      song.file_hash,
+      song.language || 'en'
     )
 
     return result.lastInsertRowid as number
@@ -310,6 +322,86 @@ class CatalogDatabase {
     `)
 
     return stmt.all(limit) as Song[]
+  }
+
+  getSongsByLanguage(language: string, limit = 50): Song[] {
+    if (!this.db) return []
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM songs
+      WHERE language = ?
+      ORDER BY title
+      LIMIT ?
+    `)
+
+    return stmt.all(language, limit) as Song[]
+  }
+
+  getPopularByLanguage(language: string, limit = 20): Song[] {
+    if (!this.db) return []
+
+    const stmt = this.db.prepare(`
+      SELECT s.*, COUNT(h.id) as play_count
+      FROM songs s
+      LEFT JOIN play_history h ON s.id = h.song_id
+      WHERE s.language = ?
+      GROUP BY s.id
+      ORDER BY play_count DESC, s.title
+      LIMIT ?
+    `)
+
+    return stmt.all(language, limit) as Song[]
+  }
+
+  getRandomByLanguage(language: string, limit = 20): Song[] {
+    if (!this.db) return []
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM songs
+      WHERE language = ?
+      ORDER BY RANDOM()
+      LIMIT ?
+    `)
+
+    return stmt.all(language, limit) as Song[]
+  }
+
+  searchSongsByLanguage(query: string, language: string, limit = 100): Song[] {
+    if (!this.db) return []
+
+    if (!query.trim()) {
+      return this.getSongsByLanguage(language, limit)
+    }
+
+    const searchPattern = `%${query}%`
+    const exactPattern = `${query}%`
+    const stmt = this.db.prepare(`
+      SELECT * FROM songs
+      WHERE language = ? AND (title LIKE ? OR artist LIKE ?)
+      ORDER BY
+        CASE
+          WHEN title LIKE ? THEN 1
+          WHEN artist LIKE ? THEN 2
+          ELSE 3
+        END,
+        title
+      LIMIT ?
+    `)
+
+    return stmt.all(language, searchPattern, searchPattern, exactPattern, exactPattern, limit) as Song[]
+  }
+
+  getLanguageCounts(): { language: string; count: number }[] {
+    if (!this.db) return []
+
+    const stmt = this.db.prepare(`
+      SELECT language, COUNT(*) as count
+      FROM songs
+      GROUP BY language
+      ORDER BY count DESC
+    `)
+
+    return stmt.all() as { language: string; count: number }[]
   }
 
   // Cleanup - remove songs whose files no longer exist

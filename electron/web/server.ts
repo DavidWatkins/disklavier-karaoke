@@ -37,8 +37,14 @@ function getLocalIP(): string {
 // API Routes
 app.get('/api/songs', (req, res) => {
   const query = (req.query.q as string) || ''
+  const lang = req.query.lang as string
   try {
-    const songs = catalogDb.searchSongs(query)
+    let songs
+    if (lang && (lang === 'en' || lang === 'es')) {
+      songs = catalogDb.searchSongsByLanguage(query, lang)
+    } else {
+      songs = catalogDb.searchSongs(query)
+    }
     res.json(songs)
   } catch (error) {
     res.status(500).json({ error: 'Failed to search songs' })
@@ -54,21 +60,42 @@ app.get('/api/queue', (_req, res) => {
   }
 })
 
-app.get('/api/popular', (_req, res) => {
+app.get('/api/popular', (req, res) => {
+  const lang = req.query.lang as string
   try {
-    const songs = catalogDb.getPopularSongs(20)
+    let songs
+    if (lang && (lang === 'en' || lang === 'es')) {
+      songs = catalogDb.getPopularByLanguage(lang, 20)
+    } else {
+      songs = catalogDb.getPopularSongs(20)
+    }
     res.json(songs)
   } catch (error) {
     res.status(500).json({ error: 'Failed to get popular songs' })
   }
 })
 
-app.get('/api/discover', (_req, res) => {
+app.get('/api/discover', (req, res) => {
+  const lang = req.query.lang as string
   try {
-    const songs = catalogDb.getRandomSongs(20)
+    let songs
+    if (lang && (lang === 'en' || lang === 'es')) {
+      songs = catalogDb.getRandomByLanguage(lang, 20)
+    } else {
+      songs = catalogDb.getRandomSongs(20)
+    }
     res.json(songs)
   } catch (error) {
     res.status(500).json({ error: 'Failed to get random songs' })
+  }
+})
+
+app.get('/api/languages', (_req, res) => {
+  try {
+    const counts = catalogDb.getLanguageCounts()
+    res.json(counts)
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get language counts' })
   }
 })
 
@@ -264,6 +291,7 @@ function getMobileAppHTML(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Karaoke Queue</title>
+  <script src="https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -534,6 +562,31 @@ function getMobileAppHTML(): string {
     .song-card .song-artist {
       font-size: 11px;
     }
+    .lang-filter {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 0 4px;
+    }
+    .lang-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border: none;
+      border-radius: 20px;
+      background: #2a2a4e;
+      color: #888;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .lang-btn.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .lang-btn:active {
+      transform: scale(0.98);
+    }
   </style>
 </head>
 <body>
@@ -544,6 +597,12 @@ function getMobileAppHTML(): string {
 
   <div class="search-box">
     <input type="text" class="search-input" id="searchInput" placeholder="Search songs..." autocomplete="off">
+  </div>
+
+  <div class="lang-filter">
+    <button class="lang-btn active" id="langAll" onclick="setLanguage('')">All</button>
+    <button class="lang-btn" id="langEn" onclick="setLanguage('en')">English</button>
+    <button class="lang-btn" id="langEs" onclick="setLanguage('es')">Espanol</button>
   </div>
 
   <div id="homeSection">
@@ -590,6 +649,7 @@ function getMobileAppHTML(): string {
   <script>
     let selectedSong = null;
     let ws = null;
+    let currentLanguage = '';
 
     // WebSocket connection
     function connectWS() {
@@ -604,6 +664,29 @@ function getMobileAppHTML(): string {
       ws.onclose = () => setTimeout(connectWS, 2000);
     }
     connectWS();
+
+    // Language filter
+    function setLanguage(lang) {
+      currentLanguage = lang;
+      // Update button states
+      document.querySelectorAll('.lang-btn').forEach(btn => btn.classList.remove('active'));
+      if (lang === 'en') document.getElementById('langEn').classList.add('active');
+      else if (lang === 'es') document.getElementById('langEs').classList.add('active');
+      else document.getElementById('langAll').classList.add('active');
+
+      // Refresh content with new language
+      loadHomeContent();
+
+      // If searching, refresh search results
+      const query = searchInput.value.trim();
+      if (query.length >= 2) {
+        searchSongs(query);
+      }
+    }
+
+    function getLangParam() {
+      return currentLanguage ? '&lang=' + currentLanguage : '';
+    }
 
     // Search functionality
     const searchInput = document.getElementById('searchInput');
@@ -621,7 +704,7 @@ function getMobileAppHTML(): string {
 
     async function searchSongs(query) {
       try {
-        const res = await fetch('/api/songs?q=' + encodeURIComponent(query));
+        const res = await fetch('/api/songs?q=' + encodeURIComponent(query) + getLangParam());
         const songs = await res.json();
         renderResults(songs);
       } catch (e) {
@@ -751,15 +834,24 @@ function getMobileAppHTML(): string {
       return div.innerHTML;
     }
 
+    // Load home content (respects language filter)
+    function loadHomeContent() {
+      const langQuery = currentLanguage ? '?lang=' + currentLanguage : '';
+      fetch('/api/popular' + langQuery).then(r => r.json()).then(renderPopular).catch(() => {});
+      fetch('/api/discover' + langQuery).then(r => r.json()).then(renderDiscover).catch(() => {});
+    }
+
     // Load initial data
     fetch('/api/queue').then(r => r.json()).then(renderQueue).catch(() => {});
-    fetch('/api/popular').then(r => r.json()).then(renderPopular).catch(() => {});
-    fetch('/api/discover').then(r => r.json()).then(renderDiscover).catch(() => {});
+    loadHomeContent();
 
-    // Audio Preview System
+    // Audio Preview System with Soundfont
     let audioContext = null;
+    let pianoPlayer = null;
     let currentPreviewId = null;
     let previewTimeouts = [];
+    let activeNotes = [];
+    let loadingPiano = false;
 
     function getAudioContext() {
       if (!audioContext) {
@@ -768,41 +860,35 @@ function getMobileAppHTML(): string {
       return audioContext;
     }
 
-    function midiToFreq(midi) {
-      return 440 * Math.pow(2, (midi - 69) / 12);
-    }
+    async function loadPiano() {
+      if (pianoPlayer || loadingPiano) return pianoPlayer;
+      loadingPiano = true;
 
-    function playNoteAtTime(midi, duration, velocity, startTime) {
-      const ctx = getAudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      // Use sine wave for cleaner sound
-      osc.type = 'sine';
-      osc.frequency.value = midiToFreq(midi);
-
-      const vol = (velocity / 127) * 0.5;
-      const noteDuration = Math.min(duration / 1000, 1.5);
-
-      // Simple piano-like envelope: instant attack, exponential decay
-      gain.gain.setValueAtTime(vol, startTime);
-      gain.gain.setTargetAtTime(0.001, startTime, noteDuration / 3);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(startTime);
-      osc.stop(startTime + noteDuration + 0.5);
+      try {
+        const ctx = getAudioContext();
+        pianoPlayer = await Soundfont.instrument(ctx, 'acoustic_grand_piano', {
+          soundfont: 'MusyngKite',
+          gain: 2.0
+        });
+        console.log('Piano soundfont loaded');
+        return pianoPlayer;
+      } catch (e) {
+        console.error('Failed to load piano:', e);
+        loadingPiano = false;
+        return null;
+      }
     }
 
     function stopPreview() {
       previewTimeouts.forEach(t => clearTimeout(t));
       previewTimeouts = [];
-      // Close and recreate audio context to stop all scheduled notes
-      if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-      }
+
+      // Stop all active notes
+      activeNotes.forEach(note => {
+        try { note.stop(); } catch(e) {}
+      });
+      activeNotes = [];
+
       if (currentPreviewId) {
         const btn = document.getElementById('preview-' + currentPreviewId);
         if (btn) {
@@ -831,22 +917,31 @@ function getMobileAppHTML(): string {
       currentPreviewId = songId;
 
       try {
+        // Load piano if not already loaded
+        const piano = await loadPiano();
+        if (!piano) {
+          throw new Error('Piano not loaded');
+        }
+
         const res = await fetch('/api/preview/' + songId);
         if (!res.ok) throw new Error('Failed to load preview');
 
         const data = await res.json();
-
-        // Schedule notes using AudioContext time for precise timing
         const ctx = getAudioContext();
         const audioStartTime = ctx.currentTime;
 
+        // Schedule notes using soundfont player
         data.notes.forEach(note => {
           const noteStartTime = audioStartTime + (note.time / 1000);
-          playNoteAtTime(note.midi, note.duration, note.velocity, noteStartTime);
-        });
+          const noteDuration = Math.min(note.duration / 1000, 2);
+          const gain = (note.velocity / 127) * 2.0;
 
-        // Track that we're playing
-        previewTimeouts.push(setTimeout(() => {}, data.duration + 500));
+          const playedNote = piano.play(note.midi, noteStartTime, {
+            gain: gain,
+            duration: noteDuration
+          });
+          activeNotes.push(playedNote);
+        });
 
         // Auto-stop after preview duration
         const stopTimeout = setTimeout(() => {
@@ -862,6 +957,9 @@ function getMobileAppHTML(): string {
         showToast('Preview unavailable');
       }
     }
+
+    // Pre-load piano on first interaction
+    document.addEventListener('click', () => loadPiano(), { once: true });
   </script>
 </body>
 </html>`
