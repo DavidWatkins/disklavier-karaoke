@@ -1,4 +1,49 @@
 import JZZ from 'jzz'
+import { WebSocketMidiOutput } from './websocket-output.js'
+
+// WebSocket output for Disklavier Pi (bypasses Network MIDI issues)
+const wsOutput = new WebSocketMidiOutput()
+
+// Helper to convert raw MIDI arrays to JZZ MIDI messages
+// This fixes Network MIDI byte corruption issues
+function toJZZMessage(message: number[]): ReturnType<typeof JZZ.MIDI> {
+  if (message.length < 1) return JZZ.MIDI()
+
+  const status = message[0]
+  const statusType = status & 0xF0
+  const channel = status & 0x0F
+
+  switch (statusType) {
+    case 0x90: // Note On
+      if (message.length >= 3) {
+        return JZZ.MIDI.noteOn(channel, message[1], message[2])
+      }
+      break
+    case 0x80: // Note Off
+      if (message.length >= 3) {
+        return JZZ.MIDI.noteOff(channel, message[1], message[2])
+      }
+      break
+    case 0xB0: // Control Change
+      if (message.length >= 3) {
+        return JZZ.MIDI.control(channel, message[1], message[2])
+      }
+      break
+    case 0xC0: // Program Change
+      if (message.length >= 2) {
+        return JZZ.MIDI.program(channel, message[1])
+      }
+      break
+    case 0xE0: // Pitch Bend
+      if (message.length >= 3) {
+        return JZZ.MIDI.pitchBend(channel, message[1], message[2])
+      }
+      break
+  }
+
+  // Fallback: wrap raw bytes in JZZ.MIDI
+  return JZZ.MIDI.apply(null, message)
+}
 
 export interface MidiOutputDevice {
   name: string
@@ -92,8 +137,9 @@ class MidiOutputManagerImpl implements MidiOutputManager {
       try {
         // Send all notes off before disconnecting
         for (let channel = 0; channel < 16; channel++) {
-          this.output.send([0xB0 | channel, 123, 0]) // All Notes Off
-          this.output.send([0xB0 | channel, 121, 0]) // Reset All Controllers
+          // Use JZZ message constructors to fix Network MIDI byte corruption
+          this.output.send(JZZ.MIDI.control(channel, 123, 0)) // All Notes Off
+          this.output.send(JZZ.MIDI.control(channel, 121, 0)) // Reset All Controllers
         }
         this.output.close()
       } catch (error) {
@@ -115,11 +161,20 @@ class MidiOutputManagerImpl implements MidiOutputManager {
     if (this.output) {
       try {
         this.sendCount++
-        // Log first few and then periodically
-        if (this.sendCount <= 3 || this.sendCount % 200 === 0) {
-          console.log(`[MidiOutput SEND #${this.sendCount}] to ${this.connectedName}: [${message.join(', ')}]`)
+        // Log first few sends with full details
+        if (this.sendCount <= 10) {
+          const jzzMessage = toJZZMessage(message)
+          console.log(`[MidiOutput SEND #${this.sendCount}] to ${this.connectedName}:`)
+          console.log(`  Input array: [${message.join(', ')}]`)
+          console.log(`  JZZ message: ${JSON.stringify(jzzMessage)}`)
+          console.log(`  JZZ toString: ${jzzMessage.toString()}`)
+          console.log(`  JZZ bytes: [${Array.from(jzzMessage).join(', ')}]`)
+          this.output.send(jzzMessage)
+        } else {
+          // Use JZZ MIDI message constructors to fix Network MIDI byte corruption
+          const jzzMessage = toJZZMessage(message)
+          this.output.send(jzzMessage)
         }
-        this.output.send(message)
       } catch (error) {
         console.error('Error sending MIDI message:', error)
       }
@@ -216,4 +271,93 @@ export async function autoConnectDisklavier(): Promise<boolean> {
     console.log('No Disklavier auto-detected among available outputs')
   }
   return false
+}
+
+// ============================================
+// WebSocket MIDI Output (Disklavier Pi Direct)
+// ============================================
+// Use this when Network MIDI has issues (rtpmidid journal parsing bugs)
+
+/**
+ * Connect to Disklavier Pi via WebSocket
+ * This bypasses Network MIDI and sends commands directly to the Pi's web interface
+ * @param host - Hostname or IP of the Pi (e.g., 'elwynn.local' or '192.168.0.251')
+ * @param port - Web server port (default 8080)
+ */
+export async function connectWebSocketMidi(host: string, port: number = 8080): Promise<boolean> {
+  // Disconnect any existing JZZ connection
+  midiOutputManager.disconnect()
+
+  return wsOutput.connect({ host, port })
+}
+
+/**
+ * Disconnect from WebSocket MIDI
+ */
+export function disconnectWebSocketMidi(): void {
+  wsOutput.disconnect()
+}
+
+/**
+ * Send MIDI via WebSocket (if connected)
+ */
+export function sendWebSocketMidi(message: number[]): void {
+  wsOutput.send(message)
+}
+
+/**
+ * Check if WebSocket MIDI is connected
+ */
+export function isWebSocketMidiConnected(): boolean {
+  return wsOutput.isConnected()
+}
+
+/**
+ * Get WebSocket connection info
+ */
+export function getWebSocketMidiStatus(): { connected: boolean; host: string | null } {
+  return {
+    connected: wsOutput.isConnected(),
+    host: wsOutput.getConnectedHost()
+  }
+}
+
+/**
+ * Universal send - sends via WebSocket if connected, otherwise via JZZ
+ */
+export function sendMidiUniversal(message: number[]): void {
+  if (wsOutput.isConnected()) {
+    wsOutput.send(message)
+  } else {
+    midiOutputManager.send(message)
+  }
+}
+
+/**
+ * Get combined MIDI status
+ */
+export function getUniversalMidiStatus(): {
+  connected: boolean
+  type: 'websocket' | 'midi' | 'none'
+  name: string | null
+} {
+  if (wsOutput.isConnected()) {
+    return {
+      connected: true,
+      type: 'websocket',
+      name: `Disklavier Pi (${wsOutput.getConnectedHost()})`
+    }
+  }
+  if (midiOutputManager.isConnected()) {
+    return {
+      connected: true,
+      type: 'midi',
+      name: midiOutputManager.getConnectedName()
+    }
+  }
+  return {
+    connected: false,
+    type: 'none',
+    name: null
+  }
 }

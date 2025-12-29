@@ -26,6 +26,10 @@ export default function Controls() {
   const [catalogPath, setCatalogPath] = useState('/Users/david/Music/Karaoke')
   const [midiOutputs, setMidiOutputs] = useState<Array<{ name: string; id: string }>>([])
   const [selectedMidiOutput, setSelectedMidiOutput] = useState<string>('')
+  const [wsHost, setWsHost] = useState<string>(() => localStorage.getItem('disklavierPiHost') || 'elwynn.local')
+  const [wsConnected, setWsConnected] = useState<boolean>(false)
+  const [wsConnecting, setWsConnecting] = useState<boolean>(false)
+  const [connectionType, setConnectionType] = useState<'websocket' | 'midi' | 'none'>('none')
   const [displays, setDisplays] = useState<Display[]>([])
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
@@ -115,8 +119,47 @@ export default function Controls() {
       if (savedSoundfont) {
         setSelectedSoundfont(savedSoundfont)
       }
+
+      // Check WebSocket MIDI status
+      const universalStatus = await window.electronAPI.getUniversalMidiStatus?.()
+      if (universalStatus) {
+        setConnectionType(universalStatus.type)
+        setWsConnected(universalStatus.type === 'websocket')
+      }
     } catch (error) {
       console.error('Failed to load settings:', error)
+    }
+  }
+
+  const handleConnectWebSocket = async () => {
+    if (!window.electronAPI) return
+
+    setWsConnecting(true)
+    try {
+      localStorage.setItem('disklavierPiHost', wsHost)
+      const success = await window.electronAPI.connectWebSocketMidi(wsHost, 8080)
+      setWsConnected(success)
+      if (success) {
+        setConnectionType('websocket')
+        setSelectedMidiOutput('') // Clear regular MIDI selection
+      }
+    } catch (error) {
+      console.error('Failed to connect WebSocket MIDI:', error)
+      setWsConnected(false)
+    } finally {
+      setWsConnecting(false)
+    }
+  }
+
+  const handleDisconnectWebSocket = async () => {
+    if (!window.electronAPI) return
+
+    try {
+      await window.electronAPI.disconnectWebSocketMidi()
+      setWsConnected(false)
+      setConnectionType('none')
+    } catch (error) {
+      console.error('Failed to disconnect WebSocket MIDI:', error)
     }
   }
 
@@ -369,14 +412,72 @@ export default function Controls() {
         <h3 className="text-lg font-medium text-gray-300 mb-4">Disklavier (MIDI)</h3>
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">
-              MIDI Output Device
-            </label>
+          {/* Connection Status */}
+          <div className={`p-3 rounded-lg ${
+            connectionType === 'websocket' ? 'bg-green-900/30 border border-green-800' :
+            connectionType === 'midi' ? 'bg-blue-900/30 border border-blue-800' :
+            'bg-gray-800 border border-gray-700'
+          }`}>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${
+                connectionType !== 'none' ? 'bg-green-400' : 'bg-gray-500'
+              }`} />
+              <span className={connectionType !== 'none' ? 'text-white' : 'text-gray-400'}>
+                {connectionType === 'websocket' ? `Connected via WebSocket (${wsHost})` :
+                 connectionType === 'midi' ? `Connected via MIDI (${selectedMidiOutput})` :
+                 'Not connected'}
+              </span>
+            </div>
+          </div>
+
+          {/* Disklavier Pi (WebSocket) - Recommended */}
+          <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-white font-medium">Disklavier Pi (Recommended)</p>
+                <p className="text-xs text-gray-400">Direct connection via WebSocket</p>
+              </div>
+              {wsConnected && (
+                <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded">
+                  Active
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={wsHost}
+                onChange={(e) => setWsHost(e.target.value)}
+                placeholder="elwynn.local or IP address"
+                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-indigo-500"
+              />
+              {wsConnected ? (
+                <button
+                  onClick={handleDisconnectWebSocket}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  onClick={handleConnectWebSocket}
+                  disabled={wsConnecting || !wsHost}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded text-sm transition-colors"
+                >
+                  {wsConnecting ? 'Connecting...' : 'Connect'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Alternative: Direct MIDI */}
+          <div className={`p-4 rounded-lg border ${wsConnected ? 'bg-gray-900 border-gray-800 opacity-60' : 'bg-gray-800 border-gray-700'}`}>
+            <p className="text-sm text-gray-400 mb-2">Alternative: Direct MIDI Output</p>
             <select
               value={selectedMidiOutput}
               onChange={(e) => handleMidiOutputChange(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+              disabled={wsConnected}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="">Select MIDI Output...</option>
               {midiOutputs.map((output: { name: string; id: string }) => (
@@ -386,7 +487,7 @@ export default function Controls() {
               ))}
             </select>
             <p className="text-xs text-gray-500 mt-2">
-              Connect your Disklavier via Network MIDI in Audio MIDI Setup
+              Use Network MIDI in Audio MIDI Setup (may have latency issues)
             </p>
           </div>
 

@@ -43,6 +43,12 @@ try {
     setMidiDelay: (delayMs: number) => ipcRenderer.invoke('midi:setDelay', delayMs),
     getMidiDelay: () => ipcRenderer.invoke('midi:getDelay'),
 
+    // WebSocket MIDI (Disklavier Pi direct connection)
+    connectWebSocketMidi: (host: string, port?: number) => ipcRenderer.invoke('midi:connectWebSocket', host, port ?? 8080),
+    disconnectWebSocketMidi: () => ipcRenderer.invoke('midi:disconnectWebSocket'),
+    getWebSocketMidiStatus: () => ipcRenderer.invoke('midi:getWebSocketStatus'),
+    getUniversalMidiStatus: () => ipcRenderer.invoke('midi:getUniversalStatus'),
+
     // Events - lyrics window receives these
     onLyricsUpdate: (callback: (lyrics: unknown) => void) => {
       ipcRenderer.on('lyrics:update', (_event: unknown, lyrics: unknown) => callback(lyrics))

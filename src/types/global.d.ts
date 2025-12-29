@@ -36,6 +36,12 @@ interface ElectronAPI {
   setMidiDelay: (delayMs: number) => Promise<number>
   getMidiDelay: () => Promise<number>
 
+  // WebSocket MIDI (Disklavier Pi direct connection)
+  connectWebSocketMidi: (host: string, port?: number) => Promise<boolean>
+  disconnectWebSocketMidi: () => Promise<void>
+  getWebSocketMidiStatus: () => Promise<{ connected: boolean; host: string | null }>
+  getUniversalMidiStatus: () => Promise<{ connected: boolean; type: 'websocket' | 'midi' | 'none'; name: string | null }>
+
   // Events
   onLyricsUpdate: (callback: (lyrics: unknown) => void) => () => void
   onPlaybackUpdate: (callback: (state: unknown) => void) => () => void

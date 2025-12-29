@@ -1,17 +1,18 @@
 # Disklavier Karaoke
 
-A karaoke system for Yamaha Disklavier pianos. The Disklavier plays the piano parts while your computer handles the backing tracks and lyrics display.
+A karaoke application for Yamaha Disklavier pianos. The Disklavier plays the piano parts while your computer handles backing tracks and lyrics display.
 
 ## Requirements
 
-- macOS, Windows, or Linux
-- Yamaha Disklavier (connected via Network MIDI)
-- A collection of .kar or .mid files with embedded lyrics
-- External display for lyrics (optional but recommended)
+- macOS (Apple Silicon or Intel)
+- Yamaha Disklavier with network connectivity
+- [Disklavier Pi](https://github.com/DavidWatkins/disklavier-pi) installed on a Raspberry Pi (recommended)
+- Collection of .kar or .mid files with embedded lyrics
+- External display for lyrics (optional)
 
 ## Installation
 
-Download the latest release for your platform from the [Releases](https://github.com/DavidWatkins/disklavier-karaoke/releases) page.
+Download the latest release from [Releases](https://github.com/DavidWatkins/disklavier-karaoke/releases).
 
 Or build from source:
 
@@ -19,89 +20,107 @@ Or build from source:
 git clone https://github.com/DavidWatkins/disklavier-karaoke.git
 cd disklavier-karaoke
 npm install
-npm run dev
+npm run build
 ```
+
+## Connecting to Your Disklavier
+
+### Option 1: Via Disklavier Pi (Recommended)
+
+This method provides the most reliable connection with no latency issues.
+
+1. Install [Disklavier Pi](https://github.com/DavidWatkins/disklavier-pi) on a Raspberry Pi connected to your Disklavier via USB
+2. In this app, go to **Settings** > **Disklavier (MIDI)**
+3. Under "Disklavier Pi", enter your Pi's hostname (e.g., `raspberrypi.local` or IP address)
+4. Click **Connect**
+
+The status indicator will turn green when connected.
+
+### Option 2: Direct Network MIDI
+
+Less reliable due to Apple MIDI Network protocol overhead.
+
+1. Open **Audio MIDI Setup** on your Mac
+2. Open MIDI Studio (Cmd+2)
+3. Connect to your Disklavier via the Network panel
+4. In this app, go to **Settings** and select the MIDI device from the dropdown
 
 ## Setup
 
 ### 1. Scan Your Song Library
 
-1. Go to the **Settings** tab
+1. Go to **Settings**
 2. Enter the path to your folder containing .kar/.mid files
 3. Click **Scan**
 
-The scanner will index all songs and detect their language (English/Spanish).
+### 2. Open Lyrics Display
 
-### 2. Connect Your Disklavier
-
-1. In **Settings**, find the MIDI Output Device dropdown
-2. Select your Disklavier (it will auto-connect if detected)
-3. Adjust the **Audio Delay** slider if the backing tracks are out of sync with the piano
-
-### 3. Open the Lyrics Display
-
-Click **Open Lyrics Window** in the main interface. If you have an external display connected, the lyrics will open there in fullscreen.
+Click **Open Lyrics Window**. If an external display is connected, lyrics open there in fullscreen.
 
 ## Usage
 
 ### Queuing Songs
 
-1. Go to the **Catalog** tab
-2. Search for songs or browse by language
-3. Click **Add to Queue** on any song
+1. Go to **Catalog**
+2. Search or browse for songs
+3. Click a song to add to queue
 4. Enter the singer's name
 
 Songs play automatically in queue order.
 
-### Playback Controls
-
-- **Play/Pause**: Space bar or the play button
-- **Skip**: Skips to the next song in queue
-- **Seek**: Click anywhere on the progress bar
-
-### Guest Web Interface
+### Guest Interface
 
 Guests can queue songs from their phones:
 
 1. A QR code appears on the lyrics display
 2. Guests scan it to open the web interface
-3. They can search and add songs to the queue
+3. They can search and add songs
 
-To show a WiFi QR code alongside, create a `.env` file:
+To show a WiFi QR code, create a `.env` file:
 
 ```
 WIFI_SSID=YourNetworkName
 WIFI_PASSWORD=YourPassword
 ```
 
+### Audio Sync
+
+If backing tracks are out of sync with the piano, adjust **Audio Delay** in Settings. Increase if backing tracks play before the piano.
+
 ## Settings
 
 ### Soundfonts
 
-The app synthesizes non-piano instruments. You can choose between:
+Non-piano instruments are synthesized. Options:
 
-- **FluidR3 GM** or **MusyngKite** (streamed from CDN)
-- **Local SF2 files** (better quality, place .sf2 files in a `soundfonts` folder)
+- **FluidR3 GM** or **MusyngKite** (streamed)
+- **Local SF2 files** (better quality, place in `soundfonts` folder)
 
-### Lyrics Display Mode
+### Lyrics Mode
 
-- **Normal**: Words highlight as they're sung
-- **Bouncing Ball**: Classic karaoke ball follows along
+- **Normal**: Words highlight as sung
+- **Bouncing Ball**: Classic karaoke ball
+
+### Background
+
+- **YouTube Videos**: Set per-song using the video icon in Catalog
+- **Animated**: Starfield, Matrix, Gradient, or Audio Visualizer
+- **Video File**: Loop a local video
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
 | Space | Play/Pause |
-| Escape | Exit fullscreen lyrics |
+| Escape | Exit fullscreen |
 
 ## Troubleshooting
 
-**No sound from backing tracks**: Click "Enable Audio" in the top bar. Browsers require user interaction before playing audio.
+**No sound from backing tracks:** Click "Enable Audio" in the top bar.
 
-**Piano out of sync**: Adjust the Audio Delay in Settings. Increase if backing tracks play before the piano.
+**Piano not playing:** Check connection status in Settings. Try Disklavier Pi if using Network MIDI.
 
-**Songs not appearing**: Make sure your files have .kar or .mid extensions and contain valid MIDI data.
+**Songs not appearing:** Ensure files have .kar or .mid extensions.
 
 ## License
 

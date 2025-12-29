@@ -12,7 +12,12 @@ import {
   connectMidiOutput,
   getMidiStatus,
   midiOutputManager,
-  autoConnectDisklavier
+  autoConnectDisklavier,
+  connectWebSocketMidi,
+  disconnectWebSocketMidi,
+  getWebSocketMidiStatus,
+  getUniversalMidiStatus,
+  sendMidiUniversal
 } from './midi/output.js'
 import { startWebServer, stopWebServer, broadcastQueue, broadcastPlayback, getQRCode, getWifiQRCode, getWifiSSID, listSoundfonts, onQueueModified, onSettingsChanged, onPlaybackControl } from './web/server.js'
 import { settingsStore, type Settings } from './settings/store.js'
@@ -211,7 +216,8 @@ function playNextInQueue() {
 
     midiPlayer.setMidiOutput({
       send: (message: number[]) => {
-        midiOutputManager.send(message)
+        // Use universal send - routes to WebSocket if connected, otherwise MIDI
+        sendMidiUniversal(message)
       },
       close: () => {}
     })
@@ -421,6 +427,23 @@ function registerIpcHandlers() {
 
   ipcMain.handle('midi:getDelay', () => {
     return midiPlayer.getMidiDelay()
+  })
+
+  // WebSocket MIDI (Disklavier Pi direct connection)
+  ipcMain.handle('midi:connectWebSocket', async (_event, host: string, port: number = 8080) => {
+    return connectWebSocketMidi(host, port)
+  })
+
+  ipcMain.handle('midi:disconnectWebSocket', () => {
+    disconnectWebSocketMidi()
+  })
+
+  ipcMain.handle('midi:getWebSocketStatus', () => {
+    return getWebSocketMidiStatus()
+  })
+
+  ipcMain.handle('midi:getUniversalStatus', () => {
+    return getUniversalMidiStatus()
   })
 
   // Settings sync across windows
