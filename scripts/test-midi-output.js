@@ -17,13 +17,13 @@ async function main() {
     console.log(`  - ${output.name}`)
   }
 
-  // Find Yamaha/Disklavier
+  // Find Yamaha MIDI
   const yamahaOutput = info.outputs.find(o =>
     /yamaha|disklavier/i.test(o.name)
   )
 
   if (!yamahaOutput) {
-    console.log('\nNo Yamaha/Disklavier output found!')
+    console.log('\nNo Yamaha MIDI output found!')
     process.exit(1)
   }
 

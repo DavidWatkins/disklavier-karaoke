@@ -62,7 +62,7 @@ function createMainWindow() {
       contextIsolation: true,
       sandbox: false
     },
-    title: 'Disklavier Karaoke'
+    title: 'MIDI Karaoke'
   })
 
   if (isDev) {
@@ -429,7 +429,7 @@ function registerIpcHandlers() {
     return midiPlayer.getMidiDelay()
   })
 
-  // WebSocket MIDI (Disklavier Pi direct connection)
+  // WebSocket MIDI (MIDI Piano Pi Server direct connection)
   ipcMain.handle('midi:connectWebSocket', async (_event, host: string, port: number = 8080) => {
     return connectWebSocketMidi(host, port)
   })
@@ -526,10 +526,10 @@ app.whenReady().then(async () => {
   // Setup MIDI player events
   setupMidiPlayerEvents()
 
-  // Auto-connect to Disklavier/Yamaha MIDI
+  // Auto-connect to Yamaha MIDI
   const connected = await autoConnectDisklavier()
   if (connected) {
-    console.log('Auto-connected to Disklavier!')
+    console.log('Auto-connected to MIDI piano!')
   }
 
   // Start guest web server

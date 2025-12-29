@@ -105,7 +105,7 @@ export default function MainControl() {
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-indigo-400">
-            Disklavier Karaoke
+            MIDI Karaoke
           </h1>
 
           <div className="flex items-center gap-4">
@@ -121,8 +121,8 @@ export default function MainControl() {
               />
               <span className="text-sm text-gray-400">
                 {midiStatus.connected
-                  ? `Disklavier: ${midiStatus.outputName}`
-                  : 'Disklavier: Not Connected'}
+                  ? `MIDI: ${midiStatus.outputName}`
+                  : 'MIDI: Not Connected'}
               </span>
             </div>
 

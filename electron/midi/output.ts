@@ -1,7 +1,7 @@
 import JZZ from 'jzz'
 import { WebSocketMidiOutput } from './websocket-output.js'
 
-// WebSocket output for Disklavier Pi (bypasses Network MIDI issues)
+// WebSocket output for MIDI Piano Pi Server (bypasses Network MIDI issues)
 const wsOutput = new WebSocketMidiOutput()
 
 // Helper to convert raw MIDI arrays to JZZ MIDI messages
@@ -179,7 +179,7 @@ class MidiOutputManagerImpl implements MidiOutputManager {
         console.error('Error sending MIDI message:', error)
       }
     }
-    // Silently ignore sends when no output connected - this is expected when no Disklavier is available
+    // Silently ignore sends when no output connected - this is expected when no MIDI piano is available
   }
 
   isConnected(): boolean {
@@ -233,8 +233,8 @@ export function getMidiStatus(): { connected: boolean; outputName: string | null
 }
 
 /**
- * Auto-detect and connect to a Disklavier
- * Looks for common Disklavier and Yamaha USB/network MIDI names
+ * Auto-detect and connect to a Yamaha MIDI piano
+ * Looks for common Yamaha USB/network MIDI names
  */
 export async function autoConnectDisklavier(): Promise<boolean> {
   const outputs = await listMidiOutputs()
@@ -244,9 +244,9 @@ export async function autoConnectDisklavier(): Promise<boolean> {
     console.log('Available MIDI outputs:', outputs.map(o => o.name).join(', '))
   }
 
-  // Common Disklavier/Yamaha MIDI names - ordered by priority
+  // Common Yamaha MIDI names - ordered by priority
   const disklavierPatterns = [
-    /disklavier/i,           // Direct Disklavier match
+    /disklavier/i,           // Disklavier match
     /dkv/i,                  // DKV abbreviation
     /yamaha.*piano/i,        // Yamaha Piano
     /clavinova/i,            // Clavinova series
@@ -259,7 +259,7 @@ export async function autoConnectDisklavier(): Promise<boolean> {
   for (const pattern of disklavierPatterns) {
     for (const output of outputs) {
       if (pattern.test(output.name)) {
-        console.log(`Auto-detected Disklavier/Yamaha: ${output.name}`)
+        console.log(`Auto-detected Yamaha MIDI: ${output.name}`)
         return connectMidiOutput(output.name)
       }
     }
@@ -268,20 +268,20 @@ export async function autoConnectDisklavier(): Promise<boolean> {
   if (outputs.length === 0) {
     console.log('No MIDI outputs available')
   } else {
-    console.log('No Disklavier auto-detected among available outputs')
+    console.log('No Yamaha MIDI auto-detected among available outputs')
   }
   return false
 }
 
 // ============================================
-// WebSocket MIDI Output (Disklavier Pi Direct)
+// WebSocket MIDI Output (MIDI Piano Pi Server Direct)
 // ============================================
 // Use this when Network MIDI has issues (rtpmidid journal parsing bugs)
 
 /**
- * Connect to Disklavier Pi via WebSocket
+ * Connect to MIDI Piano Pi Server via WebSocket
  * This bypasses Network MIDI and sends commands directly to the Pi's web interface
- * @param host - Hostname or IP of the Pi (e.g., 'elwynn.local' or '192.168.0.251')
+ * @param host - Hostname or IP of the Pi (e.g., 'raspberrypi.local' or '192.168.0.251')
  * @param port - Web server port (default 8080)
  */
 export async function connectWebSocketMidi(host: string, port: number = 8080): Promise<boolean> {
@@ -345,7 +345,7 @@ export function getUniversalMidiStatus(): {
     return {
       connected: true,
       type: 'websocket',
-      name: `Disklavier Pi (${wsOutput.getConnectedHost()})`
+      name: `MIDI Piano Pi Server (${wsOutput.getConnectedHost()})`
     }
   }
   if (midiOutputManager.isConnected()) {

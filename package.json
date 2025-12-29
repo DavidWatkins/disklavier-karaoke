@@ -1,7 +1,7 @@
 {
-  "name": "disklavier-karaoke",
+  "name": "midi-karaoke",
   "version": "0.1.0",
-  "description": "Karaoke system for Yamaha Disklavier with synchronized lyrics display",
+  "description": "MIDI Karaoke system with synchronized lyrics display",
   "main": "dist-electron/main.js",
   "author": {
     "name": "David Watkins",
@@ -61,8 +61,8 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.disklavier.karaoke",
-    "productName": "Disklavier Karaoke",
+    "appId": "com.midi.karaoke",
+    "productName": "MIDI Karaoke",
     "directories": {
       "output": "release"
     },

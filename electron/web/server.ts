@@ -1445,7 +1445,7 @@ function getAdminPortalHTML(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Portal - Disklavier Karaoke</title>
+  <title>Admin Portal - MIDI Karaoke</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -1770,7 +1770,7 @@ function getAdminPortalHTML(): string {
 
   <div class="container">
     <h1>Admin Portal</h1>
-    <p class="subtitle">Configure Disklavier Karaoke settings remotely</p>
+    <p class="subtitle">Configure MIDI Karaoke settings remotely</p>
 
     <!-- Playback Controls -->
     <div class="section">

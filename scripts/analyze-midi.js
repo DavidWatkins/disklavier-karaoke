@@ -133,7 +133,7 @@ function analyzeMidiFile(filePath) {
     }
   }
 
-  console.log(`\nRecommendation for Disklavier:`);
+  console.log(`\nRecommendation for MIDI piano:`);
   if (pianoChannels.length > 0) {
     console.log(`  Send channels: ${pianoChannels.join(', ')} (Piano instruments)`);
     console.log(`  Mute channels: ${otherChannels.join(', ')} (Non-piano)`);

@@ -21,7 +21,7 @@ async function main() {
   for (let i = 0; i < portCount; i++) {
     const name = output.getPortName(i)
     console.log(`  ${i}: ${name}`)
-    if (/network|session|disklavier/i.test(name)) {
+    if (/network|session|disklavier|yamaha/i.test(name)) {
       networkMidiPort = i
     }
   }

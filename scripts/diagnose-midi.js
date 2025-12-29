@@ -2,7 +2,7 @@
 
 /**
  * Diagnostic script to analyze MIDI/KAR files and understand why some
- * songs play correctly on the Disklavier while others don't.
+ * songs play correctly on the MIDI piano while others don't.
  *
  * Usage:
  *   node scripts/diagnose-midi.js [file1.kar] [file2.kar] ...
@@ -126,7 +126,7 @@ function analyzeMidiFile(filePath) {
 
   // Check for potential issues
   if (analysis.pianoChannels.length === 0) {
-    analysis.potentialIssues.push('No piano channels detected - all non-drum channels will be sent to Disklavier')
+    analysis.potentialIssues.push('No piano channels detected - all non-drum channels will be sent to MIDI piano')
   }
 
   // Check for tracks with notes but no instrument

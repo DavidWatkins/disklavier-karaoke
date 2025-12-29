@@ -1,8 +1,8 @@
 /**
- * WebSocket MIDI Output - connects to Disklavier Pi's WebSocket interface
+ * WebSocket MIDI Output - connects to MIDI Piano Pi Server's WebSocket interface
  * This bypasses Network MIDI (RTP-MIDI) which has compatibility issues with
  * rtpmidid's journal parsing. Instead, we send MIDI commands over WebSocket
- * and let the Pi forward them to the Disklavier via USB MIDI.
+ * and let the Pi forward them to the piano via USB MIDI.
  */
 
 import WebSocket from 'ws'
@@ -45,7 +45,7 @@ export class WebSocketMidiOutput {
 
         this.ws.on('open', () => {
           clearTimeout(timeout)
-          console.log(`[WebSocketMidi] Connected to Disklavier Pi at ${url}`)
+          console.log(`[WebSocketMidi] Connected to MIDI Piano Pi Server at ${url}`)
           this.reconnectAttempts = 0
           this.isConnecting = false
           resolve(true)

@@ -2,7 +2,7 @@
 
 /**
  * Simulate exactly what the player does - load a song and check which notes
- * would be sent to the Disklavier vs filtered out.
+ * would be sent to the MIDI piano vs filtered out.
  */
 
 import pkg from '@tonejs/midi'
@@ -70,8 +70,8 @@ scheduledNotes.sort((a, b) => a.noteOnTime - b.noteOnTime)
 
 console.log(`Total scheduled notes: ${scheduledNotes.length}`)
 
-// Step 3: Simulate shouldSendToDisklavier (like player.ts does)
-function shouldSendToDisklavier(channel) {
+// Step 3: Simulate shouldSendToPiano (like player.ts does)
+function shouldSendToPiano(channel) {
   const ch = channel & 0x0F
 
   // Never send drums (channel 9) to piano
@@ -94,7 +94,7 @@ const filteredByChannel = {}
 
 for (const scheduled of scheduledNotes) {
   const ch = scheduled.note.channel & 0x0F
-  const wouldSend = shouldSendToDisklavier(scheduled.note.channel)
+  const wouldSend = shouldSendToPiano(scheduled.note.channel)
 
   if (wouldSend) {
     sentCount++
@@ -105,7 +105,7 @@ for (const scheduled of scheduledNotes) {
   }
 }
 
-console.log(`\nNotes that WOULD be sent to Disklavier: ${sentCount}`)
+console.log(`\nNotes that WOULD be sent to MIDI piano: ${sentCount}`)
 for (const [ch, count] of Object.entries(sentByChannel).sort((a, b) => Number(a[0]) - Number(b[0]))) {
   console.log(`  Channel ${ch}: ${count} notes`)
 }
@@ -119,7 +119,7 @@ for (const [ch, count] of Object.entries(filteredByChannel).sort((a, b) => Numbe
 console.log(`\n--- First 10 notes that would be sent ---`)
 let shown = 0
 for (const scheduled of scheduledNotes) {
-  if (shouldSendToDisklavier(scheduled.note.channel)) {
+  if (shouldSendToPiano(scheduled.note.channel)) {
     console.log(`  t=${(scheduled.noteOnTime/1000).toFixed(2)}s ch=${scheduled.note.channel} note=${scheduled.note.midi} vel=${Math.round(scheduled.note.velocity * 127)}`)
     shown++
     if (shown >= 10) break
@@ -134,7 +134,7 @@ if (pianoChannels.size === 0) {
 }
 
 if (sentCount === 0) {
-  console.log(`❌ NO NOTES would be sent to Disklavier!`)
+  console.log(`❌ NO NOTES would be sent to MIDI piano!`)
 }
 
 if (sentCount > 0 && sentCount < 50) {
@@ -144,7 +144,7 @@ if (sentCount > 0 && sentCount < 50) {
 // Check if any piano tracks have very low velocity
 let lowVelocityCount = 0
 for (const scheduled of scheduledNotes) {
-  if (shouldSendToDisklavier(scheduled.note.channel)) {
+  if (shouldSendToPiano(scheduled.note.channel)) {
     if (scheduled.note.velocity < 0.1) {
       lowVelocityCount++
     }

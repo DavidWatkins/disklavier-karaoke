@@ -8,7 +8,7 @@
  *
  * Options:
  *   --list, -l          List available MIDI outputs and exit
- *   --port, -p <name>   Specify MIDI output port (default: auto-detect Disklavier)
+ *   --port, -p <name>   Specify MIDI output port (default: auto-detect Yamaha)
  *   --help, -h          Show this help message
  *
  * Examples:
@@ -43,7 +43,7 @@ Usage:
 
 Options:
   --list, -l          List available MIDI outputs and exit
-  --port, -p <name>   Specify MIDI output port (default: auto-detect Disklavier)
+  --port, -p <name>   Specify MIDI output port (default: auto-detect Yamaha)
   --help, -h          Show this help message
 
 Examples:
@@ -57,7 +57,7 @@ Examples:
   }
 }
 
-// Auto-detect Disklavier patterns
+// Auto-detect Yamaha MIDI patterns
 const disklavierPatterns = [
   /disklavier/i,
   /yamaha.*usb/i,
@@ -66,7 +66,7 @@ const disklavierPatterns = [
   /dkv/i
 ];
 
-function findDisklavier(outputs) {
+function findYamahaMidi(outputs) {
   for (const pattern of disklavierPatterns) {
     const match = outputs.find(o => pattern.test(o.name));
     if (match) return match.name;
@@ -197,8 +197,8 @@ async function main() {
       console.log('  (none found)');
     } else {
       outputs.forEach((o, i) => {
-        const isDisklavier = disklavierPatterns.some(p => p.test(o.name));
-        console.log(`  ${i}: ${o.name}${isDisklavier ? ' [Disklavier]' : ''}`);
+        const isYamaha = disklavierPatterns.some(p => p.test(o.name));
+        console.log(`  ${i}: ${o.name}${isYamaha ? ' [Yamaha]' : ''}`);
       });
     }
     process.exit(0);
@@ -222,9 +222,9 @@ async function main() {
   // Determine output port
   let selectedPort = portName;
   if (!selectedPort) {
-    selectedPort = findDisklavier(outputs);
+    selectedPort = findYamahaMidi(outputs);
     if (selectedPort) {
-      console.log(`Auto-detected Disklavier: ${selectedPort}`);
+      console.log(`Auto-detected Yamaha MIDI: ${selectedPort}`);
     } else if (outputs.length > 0) {
       selectedPort = outputs[0].name;
       console.log(`Using first available output: ${selectedPort}`);

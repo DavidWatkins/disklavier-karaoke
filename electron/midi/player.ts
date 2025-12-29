@@ -36,7 +36,7 @@ export class MidiPlayer extends EventEmitter {
   private currentSinger = ''
   private lyricsLines: ReturnType<typeof groupLyricsIntoLines> = []
   private pianoChannels: Set<number> = new Set()
-  private midiDelayMs = 500  // Delay for computer audio to sync with Disklavier
+  private midiDelayMs = 500  // Delay for computer audio to sync with MIDI piano
   private channelPrograms: Map<number, number> = new Map()  // channel -> GM program number
 
   constructor() {
@@ -63,7 +63,7 @@ export class MidiPlayer extends EventEmitter {
 
     // Set piano channels for MIDI filtering
     this.pianoChannels = new Set(song.pianoChannels || [])
-    console.log(`Piano channels for Disklavier: [${Array.from(this.pianoChannels).join(', ')}]`)
+    console.log(`Piano channels for MIDI output: [${Array.from(this.pianoChannels).join(', ')}]`)
 
     // Build channel-to-program map for audio synthesis
     this.channelPrograms.clear()
@@ -87,7 +87,7 @@ export class MidiPlayer extends EventEmitter {
       }
     }
     console.log('Notes per channel:', channelCounts)
-    console.log(`Expected piano notes to send to Disklavier: ${expectedPianoNotes}`)
+    console.log(`Expected piano notes to send to MIDI piano: ${expectedPianoNotes}`)
 
     // Reset MIDI send counter for new song
     this.midiSendCount = 0
@@ -304,11 +304,11 @@ export class MidiPlayer extends EventEmitter {
   private midiSendCount = 0
 
   private sendNoteOn(channel: number, note: number, velocity: number) {
-    // Send to MIDI output (Disklavier) - only piano channels, remapped to channel 0
+    // Send to MIDI output (piano) - only piano channels, remapped to channel 0
     const shouldSend = this.shouldSendToDisklavier(channel)
 
     if (this.midiOutput && shouldSend) {
-      // Always use channel 0 for Disklavier - many Disklaviers only listen on channel 0
+      // Always use channel 0 for MIDI piano - many pianos only listen on channel 0
       const status = 0x90 // Note on, channel 0
       this.midiSendCount++
 
@@ -317,7 +317,7 @@ export class MidiPlayer extends EventEmitter {
         console.log(`[MIDI SEND #${this.midiSendCount}] NoteOn ch=0 (was ${channel & 0x0F}) note=${note} vel=${velocity}`)
       }
 
-      // Send to Disklavier immediately
+      // Send to MIDI piano immediately
       this.midiOutput.send([status, note, velocity])
     }
 
@@ -337,9 +337,9 @@ export class MidiPlayer extends EventEmitter {
   }
 
   private sendNoteOff(channel: number, note: number) {
-    // Send to MIDI output (Disklavier) - only piano channels, remapped to channel 0
+    // Send to MIDI output (piano) - only piano channels, remapped to channel 0
     if (this.midiOutput && this.shouldSendToDisklavier(channel)) {
-      // Always use channel 0 for Disklavier - send immediately
+      // Always use channel 0 for MIDI piano - send immediately
       const status = 0x80 // Note off, channel 0
       this.midiOutput.send([status, note, 0])
     }
@@ -355,7 +355,7 @@ export class MidiPlayer extends EventEmitter {
   }
 
   private allNotesOff() {
-    // Send to MIDI output (Disklavier)
+    // Send to MIDI output (piano)
     if (this.midiOutput) {
       for (let channel = 0; channel < 16; channel++) {
         const status = 0xB0 | channel

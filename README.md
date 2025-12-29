@@ -1,37 +1,37 @@
-# Disklavier Karaoke
+# MIDI Karaoke
 
-A karaoke application for Yamaha Disklavier pianos. The Disklavier plays the piano parts while your computer handles backing tracks and lyrics display.
+A karaoke application for MIDI-enabled pianos. The piano plays the piano parts while your computer handles backing tracks and lyrics display. Tested with Yamaha DKC-800.
 
 ## Requirements
 
 - macOS (Apple Silicon or Intel)
-- Yamaha Disklavier with network connectivity
-- [Disklavier Pi](https://github.com/DavidWatkins/disklavier-pi) installed on a Raspberry Pi (recommended)
+- MIDI-enabled piano with network or USB connectivity
+- [MIDI Piano Pi Server](https://github.com/DavidWatkins/midi-piano-pi-server) installed on a Raspberry Pi (recommended)
 - Collection of .kar or .mid files with embedded lyrics
 - External display for lyrics (optional)
 
 ## Installation
 
-Download the latest release from [Releases](https://github.com/DavidWatkins/disklavier-karaoke/releases).
+Download the latest release from [Releases](https://github.com/DavidWatkins/midi-karaoke/releases).
 
 Or build from source:
 
 ```bash
-git clone https://github.com/DavidWatkins/disklavier-karaoke.git
-cd disklavier-karaoke
+git clone https://github.com/DavidWatkins/midi-karaoke.git
+cd midi-karaoke
 npm install
 npm run build
 ```
 
-## Connecting to Your Disklavier
+## Connecting to Your Piano
 
-### Option 1: Via Disklavier Pi (Recommended)
+### Option 1: Via MIDI Piano Pi Server (Recommended)
 
 This method provides the most reliable connection with no latency issues.
 
-1. Install [Disklavier Pi](https://github.com/DavidWatkins/disklavier-pi) on a Raspberry Pi connected to your Disklavier via USB
-2. In this app, go to **Settings** > **Disklavier (MIDI)**
-3. Under "Disklavier Pi", enter your Pi's hostname (e.g., `raspberrypi.local` or IP address)
+1. Install [MIDI Piano Pi Server](https://github.com/DavidWatkins/midi-piano-pi-server) on a Raspberry Pi connected to your piano via USB
+2. In this app, go to **Settings** > **MIDI Output**
+3. Under "MIDI Piano Pi Server", enter your Pi's hostname (e.g., `raspberrypi.local` or IP address)
 4. Click **Connect**
 
 The status indicator will turn green when connected.
@@ -42,7 +42,7 @@ Less reliable due to Apple MIDI Network protocol overhead.
 
 1. Open **Audio MIDI Setup** on your Mac
 2. Open MIDI Studio (Cmd+2)
-3. Connect to your Disklavier via the Network panel
+3. Connect to your piano via the Network panel
 4. In this app, go to **Settings** and select the MIDI device from the dropdown
 
 ## Setup
@@ -118,7 +118,7 @@ Non-piano instruments are synthesized. Options:
 
 **No sound from backing tracks:** Click "Enable Audio" in the top bar.
 
-**Piano not playing:** Check connection status in Settings. Try Disklavier Pi if using Network MIDI.
+**Piano not playing:** Check connection status in Settings. Try MIDI Piano Pi Server if using Network MIDI.
 
 **Songs not appearing:** Ensure files have .kar or .mid extensions.
 

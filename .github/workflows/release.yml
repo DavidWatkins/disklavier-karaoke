@@ -51,7 +51,7 @@ jobs:
         if: matrix.platform == 'mac'
         uses: actions/upload-artifact@v4
         with:
-          name: disklavier-karaoke-mac
+          name: midi-karaoke-mac
           path: |
             release/*.dmg
             release/*.zip
@@ -61,7 +61,7 @@ jobs:
         if: matrix.platform == 'linux'
         uses: actions/upload-artifact@v4
         with:
-          name: disklavier-karaoke-linux
+          name: midi-karaoke-linux
           path: |
             release/*.AppImage
             release/*.deb
@@ -71,7 +71,7 @@ jobs:
         if: matrix.platform == 'win'
         uses: actions/upload-artifact@v4
         with:
-          name: disklavier-karaoke-win
+          name: midi-karaoke-win
           path: |
             release/*.exe
           if-no-files-found: warn

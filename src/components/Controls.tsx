@@ -26,7 +26,7 @@ export default function Controls() {
   const [catalogPath, setCatalogPath] = useState('/Users/david/Music/Karaoke')
   const [midiOutputs, setMidiOutputs] = useState<Array<{ name: string; id: string }>>([])
   const [selectedMidiOutput, setSelectedMidiOutput] = useState<string>('')
-  const [wsHost, setWsHost] = useState<string>(() => localStorage.getItem('disklavierPiHost') || 'elwynn.local')
+  const [wsHost, setWsHost] = useState<string>(() => localStorage.getItem('midiPiHost') || 'elwynn.local')
   const [wsConnected, setWsConnected] = useState<boolean>(false)
   const [wsConnecting, setWsConnecting] = useState<boolean>(false)
   const [connectionType, setConnectionType] = useState<'websocket' | 'midi' | 'none'>('none')
@@ -136,7 +136,7 @@ export default function Controls() {
 
     setWsConnecting(true)
     try {
-      localStorage.setItem('disklavierPiHost', wsHost)
+      localStorage.setItem('midiPiHost', wsHost)
       const success = await window.electronAPI.connectWebSocketMidi(wsHost, 8080)
       setWsConnected(success)
       if (success) {
@@ -409,7 +409,7 @@ export default function Controls() {
 
       {/* MIDI Settings */}
       <section className="mb-8">
-        <h3 className="text-lg font-medium text-gray-300 mb-4">Disklavier (MIDI)</h3>
+        <h3 className="text-lg font-medium text-gray-300 mb-4">MIDI Output</h3>
 
         <div className="space-y-4">
           {/* Connection Status */}
@@ -430,11 +430,11 @@ export default function Controls() {
             </div>
           </div>
 
-          {/* Disklavier Pi (WebSocket) - Recommended */}
+          {/* MIDI Piano Pi Server (WebSocket) - Recommended */}
           <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-white font-medium">Disklavier Pi (Recommended)</p>
+                <p className="text-white font-medium">MIDI Piano Pi Server (Recommended)</p>
                 <p className="text-xs text-gray-400">Direct connection via WebSocket</p>
               </div>
               {wsConnected && (
@@ -508,7 +508,7 @@ export default function Controls() {
               <span className="text-white w-16 text-right">{midiDelay}ms</span>
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Delay computer audio to sync with the Disklavier. Increase if the backing track plays before the piano.
+              Delay computer audio to sync with the MIDI piano. Increase if the backing track plays before the piano.
             </p>
           </div>
 
